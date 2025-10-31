@@ -1,0 +1,50 @@
+# Virtual Environment
+venv/
+env/
+ENV/
+.venv
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+
+# Jupyter Notebook
+.ipynb_checkpoints/
+*.ipynb_checkpoints
+
+# PyTorch
+*.pth
+*.pt
+*.ckpt
+
+# Data
+data/
+datasets/
+*.csv
+*.json
+
+# Logs & Outputs
+logs/
+*.log
+wandb/
+runs/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# Results
+results/
+outputs/
+checkpoints/
+
+# Config (if contains sensitive info)
+# config_local.py
+
