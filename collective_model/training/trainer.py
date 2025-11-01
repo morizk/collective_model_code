@@ -176,7 +176,8 @@ def train_strategy_c(config, train_loader, val_loader, test_loader=None):
     # Create model
     print("Creating CollectiveModel...")
     model = CollectiveModel(config).to(device)
-    print(f"Model parameters: {model.get_num_parameters():,}")
+    model_params_true = model.get_num_parameters()  # TRUE parameter count (not calculated)
+    print(f"Model parameters: {model_params_true:,}")
     
     # Optimizer
     optimizer_name = config.get('optimizer', 'adam').lower()
@@ -206,9 +207,10 @@ def train_strategy_c(config, train_loader, val_loader, test_loader=None):
     )
     
     # Log comprehensive model architecture and training config
+    # NOTE: Do NOT log model_params or target_params as hyperparameters!
+    # These are outputs/metrics, not inputs. Only log model structure specs.
     wandb.config.update({
-        # Model architecture
-        'model_params': model.get_num_parameters(),
+        # Model architecture (structure specifications only - NOT parameter counts!)
         'n_total': config.get('n_total'),
         'n_experts': config['n_experts'],
         'n_analysts': config['n_analysts'],
@@ -299,6 +301,22 @@ def train_strategy_c(config, train_loader, val_loader, test_loader=None):
             log_dict['test/accuracy'] = test_metrics_epoch['accuracy']
             log_dict['test/loss'] = test_metrics_epoch['loss']  # Also log test loss every epoch!
         
+        # Log parameter efficiency metrics EVERY EPOCH (for graphs in wandb)
+        # Use TRUE parameter count from model (not calculated)
+        param_efficiency_100k = (val_metrics['accuracy'] / model_params_true) * 100000  # Accuracy per 100K params
+        param_efficiency_1m = (val_metrics['accuracy'] / model_params_true) * 1000000  # Accuracy per 1M params
+        
+        log_dict['param_efficiency/accuracy_per_100k_params'] = param_efficiency_100k
+        log_dict['param_efficiency/accuracy_per_1m_params'] = param_efficiency_1m
+        log_dict['model_params'] = model_params_true  # Log true param count as metric (not hyperparameter)
+        
+        # Also log test parameter efficiency if available
+        if test_metrics_epoch is not None:
+            test_param_efficiency_100k = (test_metrics_epoch['accuracy'] / model_params_true) * 100000
+            test_param_efficiency_1m = (test_metrics_epoch['accuracy'] / model_params_true) * 1000000
+            log_dict['param_efficiency/test_accuracy_per_100k_params'] = test_param_efficiency_100k
+            log_dict['param_efficiency/test_accuracy_per_1m_params'] = test_param_efficiency_1m
+        
         wandb.log(log_dict)
         
         # Print epoch summary
@@ -324,8 +342,8 @@ def train_strategy_c(config, train_loader, val_loader, test_loader=None):
             'final/test_accuracy': test_acc_final
         })
     
-    # Calculate parameter efficiency metrics
-    model_params = model.get_num_parameters()
+    # Calculate parameter efficiency metrics (use TRUE parameter count already stored)
+    # model_params_true was calculated at model creation
     
     # Final wandb summary (clear variable names, no duplicates)
     final_summary = {
@@ -335,14 +353,14 @@ def train_strategy_c(config, train_loader, val_loader, test_loader=None):
         'final_val_accuracy': history['val_acc'][-1],
         'final_train_loss': history['train_loss'][-1],
         'final_val_loss': history['val_loss'][-1],
-        'model_params': model_params,
+        'model_params': model_params_true,  # TRUE parameter count
     }
     
     if final_test_metrics:
         test_acc_final = final_test_metrics['accuracy']
         test_loss_final = final_test_metrics['loss']
-        param_efficiency = (test_acc_final / model_params) * 100000  # Accuracy per 100K parameters
-        accuracy_per_million = (test_acc_final / model_params) * 1000000  # Accuracy per 1M parameters
+        param_efficiency = (test_acc_final / model_params_true) * 100000  # Accuracy per 100K parameters (TRUE count)
+        accuracy_per_million = (test_acc_final / model_params_true) * 1000000  # Accuracy per 1M parameters (TRUE count)
         
         final_summary.update({
             'final_test_accuracy': test_acc_final,

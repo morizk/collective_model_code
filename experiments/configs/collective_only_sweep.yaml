@@ -37,7 +37,9 @@ parameters:
     value: 200  # Fixed for fair comparison
   
   batch_size:
-    values: [128, 256]  # Optimized batch sizes
+    values: [256, 512]  # Increased for smoother validation/test curves
+  eval_batch_size:
+    values: [512, 1024]  # Larger batch for validation/test (smoother metrics)  # Optimized batch sizes
   
   learning_rate:
     distribution: log_uniform_values
@@ -51,7 +53,7 @@ parameters:
     values: [0.0, 0.0001, 0.001]
   
   use_augmentation:
-    values: [true, false]
+    value: true  # Default: Use data augmentation
 
   # =============================================================================
   # COLLECTIVE ARCHITECTURE PARAMETERS (CORE - tune these!)
