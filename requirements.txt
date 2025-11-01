@@ -13,6 +13,8 @@ pandas>=2.0.0
 # Visualization
 matplotlib>=3.7.0
 seaborn>=0.12.0
+torchviz>=0.0.2  # For model architecture visualization
+graphviz>=0.20.0  # Required by torchviz
 
 # Utilities
 tqdm>=4.65.0

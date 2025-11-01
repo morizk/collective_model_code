@@ -1,0 +1,163 @@
+# Wandb Sweep Configuration for Phase 1 - Collective Model Architecture
+# This sweep tests ALL 7 models (collective + 6 baselines) with hyperparameter tuning
+
+program: train.py
+method: bayes  # Bayesian optimization (smart search)
+
+metric:
+  goal: maximize  # CRITICAL: Maximize accuracy, not minimize time!
+  name: final/test_accuracy  # Use final logged metric for sweep optimization
+
+parameters:
+  # =============================================================================
+  # MODEL TYPE (must be first - determines which other params apply)
+  # =============================================================================
+  model_type:
+    values:
+      - collective
+      - shallow
+      - balanced
+      - deep
+      - deep_resnet
+      - very_deep
+      - very_deep_resnet
+    distribution: categorical
+
+  # =============================================================================
+  # FIXED PARAMETERS (Fashion-MNIST dataset - DO NOT VARY)
+  # =============================================================================
+  dataset:
+    value: fashion_mnist  # Fashion-MNIST: MUCH harder than MNIST (88-92% vs 98%+)
+  input_dim:
+    value: 784  # Fashion-MNIST: 28*28 (FIXED, same as MNIST)
+  num_classes:
+    value: 10  # Fashion-MNIST has 10 classes (clothing categories)
+  device:
+    value: cuda
+  seed:
+    value: 42  # Fixed seed for reproducibility
+
+  # =============================================================================
+  # SHARED TRAINING HYPERPARAMETERS (all models)
+  # =============================================================================
+  batch_size:
+    values: [128, 256]  # Optimized: Increased from 32/64 for better GPU utilization
+  learning_rate:
+    distribution: log_uniform_values
+    min: 0.0005
+    max: 0.002
+  optimizer:
+    values: [adam, adamw]  # Adam and AdamW
+  weight_decay:
+    values: [0.0, 0.0001, 0.001]
+  epochs:
+    value: 200  # Full training (not 3-10!)
+  num_workers:
+    value: 4  # Data loading
+  use_augmentation:
+    values: ["true", "false"]
+
+  # =============================================================================
+  # MODEL SIZE PARAMETER (used differently by collective vs baselines)
+  # =============================================================================
+  # For COLLECTIVE: n_total and expert_ratio determine size (target_params ignored)
+  # For BASELINES: target_params determines size (n_total/expert_ratio ignored)
+  # NOTE: Values match collective model range (1.8M - 7.2M params)
+  target_params:
+    values: [1800000, 2850000, 3950000, 5000000, 6100000, 7150000]  # Target parameter count for baselines
+  
+  # =============================================================================
+  # COLLECTIVE MODEL ONLY HYPERPARAMETERS
+  # (These are ignored for baseline models)
+  # =============================================================================
+  
+  # Core architecture (determines n_experts and n_analysts via prepare_config)
+  # NOTE: For collective, these determine size (target_params is ignored)
+  n_total:
+    values: [6, 8, 10, 12]  # Total models (experts + analysts)
+  expert_ratio:
+    distribution: uniform
+    min: 0.1
+    max: 0.4  # 10% to 40% experts
+  
+  # Expert architecture
+  expert_hidden:
+    # Note: For Phase 1, we'll use fixed sizes [512, 256] but can vary expert_output
+    # To vary hidden layers, you'd need a more complex parameter structure
+    value: "[512, 256]"  # Fixed for Phase 1
+  expert_output:
+    values: [64, 128, 256]  # Output feature dimension
+  
+  # Analyst architecture
+  analyst_hidden:
+    value: "[256, 128]"  # Fixed for Phase 1
+  analyst_output:
+    values: [32, 64, 128]  # Output feature dimension
+  
+  # Compression ratios
+  c_expert:
+    distribution: uniform
+    min: 0.125
+    max: 0.5  # 12.5% to 50% compression
+  c_collective:
+    distribution: uniform
+    min: 0.125
+    max: 0.5
+  
+  # Collective layer
+  collective_version:
+    value: simple_mlp  # Phase 1: Only simple_mlp (encoder_head not implemented yet)
+  collective_hidden_scale:
+    distribution: uniform
+    min: 0.5
+    max: 2.0
+  
+  # Diversity regularization
+  use_expert_diversity:
+    values: ["true", "false"]
+  use_analyst_diversity:
+    values: ["true", "false"]
+  diversity_lambda:
+    distribution: uniform
+    min: 0.005
+    max: 0.02
+  diversity_temperature:
+    distribution: uniform
+    min: 0.5
+    max: 2.0
+  
+  # Architecture diversity
+  vary_expert_architectures:
+    values: ["true", "false"]
+  vary_analyst_architectures:
+    values: ["true", "false"]
+
+  # =============================================================================
+  # WANDB SETTINGS
+  # =============================================================================
+  wandb_project:
+    value: collective-architecture
+
+# =============================================================================
+# EARLY STOPPING (Hyperband)
+# =============================================================================
+early_terminate:
+  type: hyperband
+  min_iter: 20  # Minimum 20 epochs (catches early patterns)
+  max_iter: 200  # Maximum 200 epochs if promising
+  s: 2  # Aggressiveness factor
+  eta: 3  # Keep top 1/3 at each rung
+
+# =============================================================================
+# NOTES:
+# =============================================================================
+# 1. Derived parameters (n_experts, n_analysts, expert_encoder_output_dim, etc.)
+#    are computed automatically in prepare_config() - DO NOT include in sweep
+# 2. Model size handling:
+#    - COLLECTIVE models: Use n_total + expert_ratio (ignore target_params)
+#    - BASELINE models: Use target_params (ignore n_total/expert_ratio)
+# 3. Parameter efficiency metric logged: accuracy_per_100k_params = (accuracy / params) * 100000
+# 4. With optimized batch_size=128-256, training is 4-8x faster than original
+# 5. Expected: ~30-50 configs per model type, ~20-40 hours total on 1 GPU
+# 6. Use multiple wandb agents in parallel for faster completion
+

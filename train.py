@@ -1,0 +1,438 @@
+"""
+Main training script for Collective Model and Baselines.
+
+Supports:
+- Collective Model (Strategy C - end-to-end)
+- 6 Baseline architectures (shallow, balanced, deep, very_deep, deep_resnet, very_deep_resnet)
+
+Usage:
+    # Train collective model with debug config
+    python train.py --config debug --model collective
+    
+    # Train shallow baseline with phase1 config
+    python train.py --config phase1 --model shallow
+    
+    # Train all baselines (run separately)
+    python train.py --config phase1 --model balanced
+    python train.py --config phase1 --model deep
+    python train.py --config phase1 --model very_deep
+    python train.py --config phase1 --model deep_resnet
+    python train.py --config phase1 --model very_deep_resnet
+"""
+
+import argparse
+import torch
+import wandb
+import sys
+from pathlib import Path
+
+# Add current directory to path
+sys.path.insert(0, str(Path(__file__).parent))
+
+from collective_model.config import CONFIG_DEBUG, CONFIG_PHASE1, prepare_config
+from collective_model.data.loaders import get_data_loaders
+from collective_model.training import CollectiveModel, train_strategy_c
+from collective_model.utils.param_counter import count_parameters
+from baselines.monolithic import MonolithicMLP, ResNetMLP
+from baselines.find_baselines import find_all_baselines, find_all_baselines_with_target
+
+
+def train_baseline(config, model, train_loader, val_loader, test_loader, device):
+    """
+    Train a baseline model (monolithic MLP or ResNet).
+    
+    Uses the same training loop structure as collective model but simpler
+    (no diversity loss, no intermediate outputs).
+    """
+    from collective_model.training.trainer import train_epoch, validate
+    from collective_model.utils.metrics import compute_accuracy
+    import torch.nn.functional as F
+    
+    # Setup optimizer
+    optimizer_name = config.get('optimizer', 'adam').lower()
+    if optimizer_name == 'adam':
+        optimizer = torch.optim.Adam(
+            model.parameters(),
+            lr=config['learning_rate'],
+            weight_decay=config.get('weight_decay', 0.0)
+        )
+    elif optimizer_name == 'adamw':
+        optimizer = torch.optim.AdamW(
+            model.parameters(),
+            lr=config['learning_rate'],
+            weight_decay=config.get('weight_decay', 0.0)
+        )
+    elif optimizer_name == 'sgd':
+        optimizer = torch.optim.SGD(
+            model.parameters(),
+            lr=config['learning_rate'],
+            momentum=0.9,
+            weight_decay=config.get('weight_decay', 0.0)
+        )
+    else:
+        raise ValueError(f"Unknown optimizer: {optimizer_name}")
+    
+    # Training loop
+    best_val_acc = 0.0
+    epochs = config['epochs']
+    
+    for epoch in range(epochs):
+        # Train
+        model.train()
+        train_loss = 0.0
+        train_correct = 0
+        train_total = 0
+        
+        for data, target in train_loader:
+            data, target = data.to(device), target.to(device)
+            
+            optimizer.zero_grad()
+            output = model(data)
+            loss = F.cross_entropy(output, target)
+            loss.backward()
+            optimizer.step()
+            
+            train_loss += loss.item()
+            _, predicted = output.max(1)
+            train_total += target.size(0)
+            train_correct += predicted.eq(target).sum().item()
+        
+        train_acc = 100. * train_correct / train_total
+        avg_train_loss = train_loss / len(train_loader)
+        
+        # Validate
+        model.eval()
+        val_loss = 0.0
+        val_correct = 0
+        val_total = 0
+        
+        with torch.no_grad():
+            for data, target in val_loader:
+                data, target = data.to(device), target.to(device)
+                output = model(data)
+                loss = F.cross_entropy(output, target)
+                
+                val_loss += loss.item()
+                _, predicted = output.max(1)
+                val_total += target.size(0)
+                val_correct += predicted.eq(target).sum().item()
+        
+        val_acc = 100. * val_correct / val_total
+        avg_val_loss = val_loss / len(val_loader)
+        
+        # Test
+        test_correct = 0
+        test_total = 0
+        with torch.no_grad():
+            for data, target in test_loader:
+                data, target = data.to(device), target.to(device)
+                output = model(data)
+                _, predicted = output.max(1)
+                test_total += target.size(0)
+                test_correct += predicted.eq(target).sum().item()
+        
+        test_acc = 100. * test_correct / test_total
+        
+        # Log to wandb (same metrics as collective for consistency)
+        wandb.log({
+            'epoch': epoch,
+            'train/loss': avg_train_loss,
+            'train/loss_prediction': avg_train_loss,  # For baselines, total loss = prediction loss
+            'train/accuracy': train_acc,
+            'val/loss': avg_val_loss,
+            'val/accuracy': val_acc,
+            'test/accuracy': test_acc,
+            'lr': optimizer.param_groups[0]['lr']
+        })
+        
+        # Print progress
+        print(f'Epoch {epoch+1}/{epochs}: '
+              f'Train Loss: {avg_train_loss:.4f}, Train Acc: {train_acc:.2f}%, '
+              f'Val Acc: {val_acc:.2f}%, Test Acc: {test_acc:.2f}%')
+        
+        # Save best model
+        if val_acc > best_val_acc:
+            best_val_acc = val_acc
+    
+    print(f'\nTraining complete! Best validation accuracy: {best_val_acc:.2f}%')
+    
+    # Calculate parameter efficiency metrics
+    model_params = count_parameters(model)
+    param_efficiency = (test_acc / model_params) * 100000  # Accuracy per 100K parameters
+    
+    # Log final metrics including parameter efficiency
+    wandb.log({
+        'final/best_val_accuracy': best_val_acc,
+        'final/test_accuracy': test_acc,
+        'final/model_params': model_params,
+        'final/param_efficiency': param_efficiency,  # Acc per 100K params
+        'final/accuracy_per_million_params': (test_acc / model_params) * 1000000  # Acc per 1M params
+    })
+    
+    print(f'Parameter Efficiency: {param_efficiency:.2f} accuracy per 100K parameters')
+    
+    return {
+        'best_val_acc': best_val_acc,
+        'final_test_acc': test_acc,
+        'model_params': model_params,
+        'param_efficiency': param_efficiency
+    }
+
+
+def main():
+    parser = argparse.ArgumentParser(
+        description='Train Collective Model or Baseline',
+        formatter_class=argparse.ArgumentDefaultsHelpFormatter
+    )
+    parser.add_argument(
+        '--config', 
+        type=str, 
+        default='debug',
+        choices=['debug', 'phase1'],
+        help='Configuration preset (ignored in wandb sweep mode)'
+    )
+    parser.add_argument(
+        '--model', 
+        type=str, 
+        default='collective',
+        choices=['collective', 'shallow', 'balanced', 'deep', 'very_deep', 
+                 'deep_resnet', 'very_deep_resnet'],
+        help='Model type to train (ignored in wandb sweep mode)'
+    )
+    parser.add_argument(
+        '--device',
+        type=str,
+        default=None,
+        help='Device to use (cuda/cpu). Auto-detects if not specified.'
+    )
+    
+    # Parse known args first to detect if there are extra args (sweep params)
+    known_args, unknown_args = parser.parse_known_args()
+    args = known_args
+    sweep_mode = len(unknown_args) > 0
+    
+    # Initialize wandb (will detect sweep mode automatically if called by wandb agent)
+    if sweep_mode:
+        # Wandb agent passes sweep params as command-line args
+        # Initialize wandb to read them from environment/config
+        wandb.init()
+        
+        # Check if this is actually a sweep run
+        # wandb.config is a Config object, check if it has items
+        if wandb.run is None:
+            # Not a real sweep run, might be test mode
+            sweep_mode = False
+            wandb.finish()
+            wandb.init(mode='disabled')  # Disable wandb for test
+        else:
+            # Check if config has sweep parameters (more than just default keys)
+            config_dict = dict(wandb.config)
+            if len(config_dict) < 5:
+                # Not enough params, might not be a sweep
+                sweep_mode = False
+    
+    if sweep_mode and wandb.run is not None:
+        # Sweep mode: read all parameters from wandb.config
+        print("="*60)
+        print("WANDB SWEEP MODE")
+        print("="*60)
+        sweep_config = dict(wandb.config)
+        
+        # Start with base config (use phase1 as default for sweeps)
+        config = CONFIG_PHASE1.copy()
+        
+        # Override with sweep parameters
+        for key, value in sweep_config.items():
+            # Handle string conversions for boolean-like values
+            if isinstance(value, str):
+                if value.lower() == 'true':
+                    config[key] = True
+                elif value.lower() == 'false':
+                    config[key] = False
+                elif key in ['expert_hidden', 'analyst_hidden']:
+                    # Parse list strings like "[512, 256]"
+                    import ast
+                    try:
+                        config[key] = ast.literal_eval(value)
+                    except:
+                        config[key] = value
+                else:
+                    config[key] = value
+            else:
+                config[key] = value
+        
+        # Extract model_type from sweep config
+        model_type = sweep_config.get('model_type', 'collective')
+        
+        print(f"Model type from sweep: {model_type}")
+        print(f"Key sweep parameters:")
+        print(f"  batch_size: {config.get('batch_size')}")
+        print(f"  learning_rate: {config.get('learning_rate')}")
+        print(f"  optimizer: {config.get('optimizer')}")
+        if model_type == 'collective':
+            print(f"  n_total: {config.get('n_total')}")
+            print(f"  expert_ratio: {config.get('expert_ratio')}")
+        print("="*60)
+    else:
+        # Normal mode: use command-line arguments
+        if args.config == 'debug':
+            config = CONFIG_DEBUG.copy()
+        else:
+            config = CONFIG_PHASE1.copy()
+        
+        model_type = args.model
+    
+    # Prepare config (computes n_experts, n_analysts, etc.)
+    config = prepare_config(config)
+    
+    # Set device
+    if args.device is None:
+        device = torch.device('cuda' if torch.cuda.is_available() and config.get('use_gpu', True) else 'cpu')
+    else:
+        device = torch.device(args.device)
+    
+    print(f"Using device: {device}")
+    
+    # Get data loaders first (needed for both collective and baselines)
+    dataset_name = config.get('dataset', 'mnist')
+    print(f"\nLoading data: {dataset_name.upper()}...")
+    loaders, dataset_info = get_data_loaders(
+        dataset_name=dataset_name,
+        batch_size=config['batch_size'],
+        val_split=config.get('val_split', 0.1),
+        num_workers=config.get('num_workers', 2),
+        use_augmentation=config.get('use_augmentation', False)
+    )
+    
+    train_loader = loaders['train']
+    val_loader = loaders['val']
+    test_loader = loaders['test']
+    
+    # Update config with dataset info
+    config['input_dim'] = dataset_info['input_dim']
+    config['num_classes'] = dataset_info['num_classes']
+    config['device'] = device
+    
+    print(f"  Train batches: {len(train_loader)}")
+    print(f"  Val batches: {len(val_loader)}")
+    print(f"  Test batches: {len(test_loader)}")
+    
+    # Train based on model type
+    if model_type == 'collective':
+        # Collective model: train_strategy_c handles model creation and wandb
+        print(f"\nTraining Collective Model...")
+        if not sweep_mode:
+            # Only set wandb project/name if not in sweep mode (sweep handles this)
+            config['wandb_project'] = config.get('wandb_project', 'collective-architecture')
+            config['wandb_name'] = f"{args.config}-{args.model}"
+        train_strategy_c(
+            config=config,
+            train_loader=train_loader,
+            val_loader=val_loader,
+            test_loader=test_loader
+        )
+    else:
+        # Baseline: we handle everything
+        print(f"\nCreating {model_type} baseline model...")
+        
+        # Determine target parameter count
+        if sweep_mode and 'target_params' in config:
+            # Sweep mode: use target_params from sweep config
+            target_params = int(config['target_params'])
+            print(f"  Target parameter count from sweep: {target_params:,}")
+            
+            # Build a minimal config for baseline finding
+            baseline_search_config = {
+                'input_dim': config['input_dim'],
+                'num_classes': config['num_classes'],
+                'target_params': target_params  # Use this directly
+            }
+            
+            # Find baseline matching this target
+            print(f"  Finding {model_type} baseline matching {target_params:,} parameters...")
+            baselines = find_all_baselines_with_target(baseline_search_config, target_params)
+        else:
+            # Normal mode or no target_params: use collective model to determine target
+            print("  Finding matching baseline architectures (using collective reference)...")
+            baselines = find_all_baselines(config)
+        
+        if model_type not in baselines:
+            raise ValueError(f"Unknown baseline type: {model_type}")
+        
+        baseline_config = baselines[model_type]
+        hidden_dims = baseline_config['hidden_dims']
+        use_skip = baseline_config.get('use_skip_connections', False)
+        
+        if use_skip:
+            model = ResNetMLP(
+                input_dim=config['input_dim'],
+                hidden_dims=hidden_dims,
+                num_classes=config['num_classes'],
+                dropout=config.get('dropout', 0.1),
+                use_batchnorm=True
+            )
+            model_type_name = f"ResNet Baseline ({model_type})"
+        else:
+            model = MonolithicMLP(
+                input_dim=config['input_dim'],
+                hidden_dims=hidden_dims,
+                num_classes=config['num_classes'],
+                dropout=config.get('dropout', 0.1),
+                use_batchnorm=True
+            )
+            model_type_name = f"MLP Baseline ({model_type})"
+        
+        model = model.to(device)
+        total_params = count_parameters(model)
+        
+        print(f"  Architecture: {hidden_dims}")
+        print(f"  Model params: {total_params:,} (target: {baseline_config['params']:,})")
+        
+        # Initialize wandb for baseline (only if not in sweep mode)
+        if not sweep_mode:
+            wandb.init(
+                project="collective-architecture",
+                name=f"{args.config}-{model_type}",
+                config={
+                    **config,
+                    'model_type': model_type,
+                    'model_params': total_params,
+                    'baseline_hidden_dims': hidden_dims,
+                    'baseline_target_params': baseline_config['params'],
+                    'use_skip_connections': use_skip
+                },
+                tags=[args.config, model_type, config.get('dataset', 'mnist'), "baseline"]
+            )
+        else:
+            # In sweep mode, wandb is already initialized, just update config
+            wandb.config.update({
+                'model_type': model_type,
+                'model_params': total_params,
+                'baseline_hidden_dims': hidden_dims,
+                'baseline_target_params': baseline_config['params'],
+                'use_skip_connections': use_skip
+            })
+        
+        # Train baseline
+        print(f"\nStarting training for {config['epochs']} epochs...")
+        print("=" * 60)
+        train_baseline(
+            config=config,
+            model=model,
+            train_loader=train_loader,
+            val_loader=val_loader,
+            test_loader=test_loader,
+            device=device
+        )
+    
+    print("=" * 60)
+    print("Training complete!")
+    
+    # wandb.finish() is called by train_strategy_c for collective, or by train_baseline if needed
+    if model_type != 'collective' and not sweep_mode:
+        wandb.finish()
+
+
+if __name__ == '__main__':
+    main()
+
