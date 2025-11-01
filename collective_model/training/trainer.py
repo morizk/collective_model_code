@@ -391,7 +391,7 @@ def train_strategy_c(config, train_loader, val_loader, test_loader=None):
         'history': history,
         'best_val_acc': best_val_acc,
         'best_epoch': best_epoch,
-        'test_metrics': test_metrics,
+        'test_metrics': final_test_metrics,
         'model': model
     }
 
