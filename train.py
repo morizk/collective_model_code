@@ -120,18 +120,23 @@ def train_baseline(config, model, train_loader, val_loader, test_loader, device)
         val_acc = 100. * val_correct / val_total
         avg_val_loss = val_loss / len(val_loader)
         
-        # Test
+        # Test (calculate BOTH loss and accuracy every epoch)
+        test_loss = 0.0
         test_correct = 0
         test_total = 0
         with torch.no_grad():
             for data, target in test_loader:
                 data, target = data.to(device), target.to(device)
                 output = model(data)
+                loss = F.cross_entropy(output, target)
+                
+                test_loss += loss.item()
                 _, predicted = output.max(1)
                 test_total += target.size(0)
                 test_correct += predicted.eq(target).sum().item()
         
         test_acc = 100. * test_correct / test_total
+        avg_test_loss = test_loss / len(test_loader)
         
         # Log to wandb (same metrics as collective for consistency)
         wandb.log({
@@ -141,6 +146,7 @@ def train_baseline(config, model, train_loader, val_loader, test_loader, device)
             'train/accuracy': train_acc,
             'val/loss': avg_val_loss,
             'val/accuracy': val_acc,
+            'test/loss': avg_test_loss,  # Also log test loss every epoch!
             'test/accuracy': test_acc,
             'lr': optimizer.param_groups[0]['lr']
         })
@@ -148,7 +154,8 @@ def train_baseline(config, model, train_loader, val_loader, test_loader, device)
         # Print progress
         print(f'Epoch {epoch+1}/{epochs}: '
               f'Train Loss: {avg_train_loss:.4f}, Train Acc: {train_acc:.2f}%, '
-              f'Val Acc: {val_acc:.2f}%, Test Acc: {test_acc:.2f}%')
+              f'Val Loss: {avg_val_loss:.4f}, Val Acc: {val_acc:.2f}%, '
+              f'Test Loss: {avg_test_loss:.4f}, Test Acc: {test_acc:.2f}%')
         
         # Save best model
         if val_acc > best_val_acc:

@@ -294,9 +294,10 @@ def train_strategy_c(config, train_loader, val_loader, test_loader=None):
             'lr': optimizer.param_groups[0]['lr']  # Log learning rate
         }
         
-        # Add test accuracy if available
+        # Add test metrics if available (accuracy AND loss every epoch!)
         if test_metrics_epoch is not None:
             log_dict['test/accuracy'] = test_metrics_epoch['accuracy']
+            log_dict['test/loss'] = test_metrics_epoch['loss']  # Also log test loss every epoch!
         
         wandb.log(log_dict)
         
@@ -304,7 +305,7 @@ def train_strategy_c(config, train_loader, val_loader, test_loader=None):
         print(f"  Train: Loss={train_metrics['loss']:.4f}, Acc={train_metrics['accuracy']:.2f}%")
         print(f"  Val:   Loss={val_metrics['loss']:.4f}, Acc={val_metrics['accuracy']:.2f}%")
         if test_metrics_epoch is not None:
-            print(f"  Test:  Acc={test_metrics_epoch['accuracy']:.2f}%")
+            print(f"  Test:  Loss={test_metrics_epoch['loss']:.4f}, Acc={test_metrics_epoch['accuracy']:.2f}%")
         if val_metrics['accuracy'] == best_val_acc:
             print(f"  ✓ New best validation accuracy!")
     
