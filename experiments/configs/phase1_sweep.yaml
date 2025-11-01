@@ -41,7 +41,9 @@ parameters:
   # SHARED TRAINING HYPERPARAMETERS (all models)
   # =============================================================================
   batch_size:
-    values: [128, 256]  # Optimized: Increased from 32/64 for better GPU utilization
+    values: [256, 512]  # Increased for smoother validation/test curves
+  eval_batch_size:
+    values: [512, 1024]  # Larger batch for validation/test (smoother metrics)
   learning_rate:
     distribution: log_uniform_values
     min: 0.0005

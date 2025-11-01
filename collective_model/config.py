@@ -34,12 +34,13 @@ CONFIG_DEBUG = {
     'vary_analyst_architectures': False,  # Use different analyst architectures
     
     # Training
-    'batch_size': 128,  # Optimized: Increased from 32 for better GPU utilization (was 11.4%, now ~60-80% expected)
+    'batch_size': 256,  # Increased for smoother validation/test curves
+    'eval_batch_size': 512,  # Larger batch size for validation/test (smoother metrics, no gradients)
     'learning_rate': 0.001,
     'epochs': 5,
     'optimizer': 'adam',  # 'adam', 'sgd', 'adamw' - Adam is good default for deep models
     'weight_decay': 0.0,
-    'use_augmentation': False,
+    'use_augmentation': True,  # Default: Use data augmentation (doesn't apply to val/test)
     'topk': (1,),  # Top-k accuracy: (1,) for top-1, (1, 5) for top-1 and top-5
     
     # Data
@@ -76,12 +77,13 @@ CONFIG_PHASE1 = {
     'vary_analyst_architectures': False,
     
     # Training
-    'batch_size': 256,  # Optimized: Increased from 128 for better GPU utilization (based on GPU monitoring: 11.4% util, 2.7% memory → can use 256-512)
+    'batch_size': 512,  # Increased for smoother validation/test curves
+    'eval_batch_size': 1024,  # Larger batch size for validation/test (smoother metrics, no gradients)
     'learning_rate': 0.001,
     'epochs': 200,
     'optimizer': 'adam',  # 'adam', 'sgd', 'adamw' - Adam is good default for deep models
     'weight_decay': 1e-4,
-    'use_augmentation': False,  # Start without augmentation
+    'use_augmentation': True,  # Default: Use data augmentation (only for training, not val/test)
     'topk': (1,),  # Top-k accuracy: (1,) for top-1, (1, 5) for top-1 and top-5
     
     # Data

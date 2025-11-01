@@ -233,7 +233,7 @@ def train_strategy_c(config, train_loader, val_loader, test_loader=None):
         'learning_rate': config.get('learning_rate'),
         'weight_decay': config.get('weight_decay'),
         'batch_size': config.get('batch_size'),
-        'use_augmentation': config.get('use_augmentation', False),
+        'eval_batch_size': config.get('eval_batch_size', None),
         'topk': config.get('topk', (1,)),
         # Dataset info
         'dataset': config.get('dataset'),
@@ -309,48 +309,62 @@ def train_strategy_c(config, train_loader, val_loader, test_loader=None):
         if val_metrics['accuracy'] == best_val_acc:
             print(f"  ✓ New best validation accuracy!")
     
-    # Final test evaluation (if provided)
-    test_metrics = None
+    # Final test evaluation (if provided) - use consistent variable names
+    final_test_metrics = None
     if test_loader is not None:
         print("\nEvaluating on test set...")
-        test_metrics = validate(model, test_loader, config, device)
-        print(f"  Test: Loss={test_metrics['loss']:.4f}, Acc={test_metrics['accuracy']:.2f}%")
+        final_test_metrics = validate(model, test_loader, config, device)
+        test_loss_final = final_test_metrics['loss']
+        test_acc_final = final_test_metrics['accuracy']
+        print(f"  Test: Loss={test_loss_final:.4f}, Acc={test_acc_final:.2f}%")
         
+        # Log final test metrics
         wandb.log({
-            'test/loss': test_metrics['loss'],
-            'test/accuracy': test_metrics['accuracy']
+            'final/test_loss': test_loss_final,
+            'final/test_accuracy': test_acc_final
         })
     
     # Calculate parameter efficiency metrics
     model_params = model.get_num_parameters()
     
-    # Final wandb summary
+    # Final wandb summary (clear variable names, no duplicates)
     final_summary = {
-        'best_val_acc': best_val_acc,
+        'best_val_accuracy': best_val_acc,
         'best_epoch': best_epoch,
-        'final_train_acc': history['train_acc'][-1],
-        'final_val_acc': history['val_acc'][-1],
-        'final/model_params': model_params,
+        'final_train_accuracy': history['train_acc'][-1],
+        'final_val_accuracy': history['val_acc'][-1],
+        'final_train_loss': history['train_loss'][-1],
+        'final_val_loss': history['val_loss'][-1],
+        'model_params': model_params,
     }
     
-    if test_metrics:
-        test_acc = test_metrics['accuracy']
-        param_efficiency = (test_acc / model_params) * 100000  # Accuracy per 100K parameters
+    if final_test_metrics:
+        test_acc_final = final_test_metrics['accuracy']
+        test_loss_final = final_test_metrics['loss']
+        param_efficiency = (test_acc_final / model_params) * 100000  # Accuracy per 100K parameters
+        accuracy_per_million = (test_acc_final / model_params) * 1000000  # Accuracy per 1M parameters
         
         final_summary.update({
-            'test_acc': test_acc,
-            'final/test_accuracy': test_acc,
+            'final_test_accuracy': test_acc_final,
+            'final_test_loss': test_loss_final,
+            'final/test_accuracy': test_acc_final,
+            'final/test_loss': test_loss_final,
             'final/param_efficiency': param_efficiency,  # Acc per 100K params
-            'final/accuracy_per_million_params': (test_acc / model_params) * 1000000  # Acc per 1M params
+            'param_efficiency': param_efficiency,
+            'final/accuracy_per_million_params': accuracy_per_million,
+            'accuracy_per_million_params': accuracy_per_million
         })
         
         # Also log as metrics for sweep optimization
         wandb.log({
-            'final/test_accuracy': test_acc,
-            'final/param_efficiency': param_efficiency
+            'final/test_accuracy': test_acc_final,
+            'final/test_loss': test_loss_final,
+            'final/param_efficiency': param_efficiency,
+            'final/accuracy_per_million_params': accuracy_per_million
         })
         
         print(f"\nParameter Efficiency: {param_efficiency:.2f} accuracy per 100K parameters")
+        print(f"Accuracy per Million Params: {accuracy_per_million:.2f}")
     
     wandb.summary.update(final_summary)
     wandb.finish()

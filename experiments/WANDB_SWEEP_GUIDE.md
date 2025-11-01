@@ -29,9 +29,10 @@ source venv/bin/activate
 wandb sweep experiments/configs/phase1_sweep.yaml
 ```
 
-This will output a sweep ID like: `morizk/collective_model_code/bvplca5y`
+This will output a sweep ID like: `morizk/collective_model_code/ydnjncz0`
 
 **Note**: The sweep ID format is `username/project_name/sweep_id`
+**Current Sweep ID**: `morizk/collective_model_code/ydnjncz0`
 
 **Option 2: Using Python**
 ```python

@@ -72,16 +72,19 @@ def train_baseline(config, model, train_loader, val_loader, test_loader, device)
     else:
         raise ValueError(f"Unknown optimizer: {optimizer_name}")
     
+    # Import metrics utilities for consistent calculation
+    from collective_model.utils.metrics import AverageMeter, compute_accuracy
+    
     # Training loop
     best_val_acc = 0.0
     epochs = config['epochs']
+    topk = config.get('topk', (1,))  # Top-k accuracy for consistent metrics
     
     for epoch in range(epochs):
         # Train
         model.train()
-        train_loss = 0.0
-        train_correct = 0
-        train_total = 0
+        train_loss_meter = AverageMeter('Train Loss', ':.4f')
+        train_acc_meter = AverageMeter('Train Acc', ':.2f')
         
         for data, target in train_loader:
             data, target = data.to(device), target.to(device)
@@ -92,19 +95,16 @@ def train_baseline(config, model, train_loader, val_loader, test_loader, device)
             loss.backward()
             optimizer.step()
             
-            train_loss += loss.item()
-            _, predicted = output.max(1)
-            train_total += target.size(0)
-            train_correct += predicted.eq(target).sum().item()
+            # Update metrics using AverageMeter
+            batch_size = data.size(0)
+            train_loss_meter.update(loss.item(), batch_size)
+            accuracies = compute_accuracy(output, target, topk=topk)
+            train_acc_meter.update(accuracies[0], batch_size)  # Top-1 accuracy
         
-        train_acc = 100. * train_correct / train_total
-        avg_train_loss = train_loss / len(train_loader)
-        
-        # Validate
+        # Validate (using AverageMeter for consistency)
         model.eval()
-        val_loss = 0.0
-        val_correct = 0
-        val_total = 0
+        val_loss_meter = AverageMeter('Val Loss', ':.4f')
+        val_acc_meter = AverageMeter('Val Acc', ':.2f')
         
         with torch.no_grad():
             for data, target in val_loader:
@@ -112,68 +112,83 @@ def train_baseline(config, model, train_loader, val_loader, test_loader, device)
                 output = model(data)
                 loss = F.cross_entropy(output, target)
                 
-                val_loss += loss.item()
-                _, predicted = output.max(1)
-                val_total += target.size(0)
-                val_correct += predicted.eq(target).sum().item()
+                # Update metrics using AverageMeter
+                batch_size = data.size(0)
+                val_loss_meter.update(loss.item(), batch_size)
+                accuracies = compute_accuracy(output, target, topk=topk)
+                val_acc_meter.update(accuracies[0], batch_size)  # Top-1 accuracy
         
-        val_acc = 100. * val_correct / val_total
-        avg_val_loss = val_loss / len(val_loader)
+        # Test (using AverageMeter for consistency)
+        test_loss_meter = AverageMeter('Test Loss', ':.4f')
+        test_acc_meter = AverageMeter('Test Acc', ':.2f')
         
-        # Test (calculate BOTH loss and accuracy every epoch)
-        test_loss = 0.0
-        test_correct = 0
-        test_total = 0
         with torch.no_grad():
             for data, target in test_loader:
                 data, target = data.to(device), target.to(device)
                 output = model(data)
                 loss = F.cross_entropy(output, target)
                 
-                test_loss += loss.item()
-                _, predicted = output.max(1)
-                test_total += target.size(0)
-                test_correct += predicted.eq(target).sum().item()
+                # Update metrics using AverageMeter
+                batch_size = data.size(0)
+                test_loss_meter.update(loss.item(), batch_size)
+                accuracies = compute_accuracy(output, target, topk=topk)
+                test_acc_meter.update(accuracies[0], batch_size)  # Top-1 accuracy
         
-        test_acc = 100. * test_correct / test_total
-        avg_test_loss = test_loss / len(test_loader)
+        # Extract final metrics (clear variable names, no duplicates)
+        train_loss_final = train_loss_meter.avg
+        train_acc_final = train_acc_meter.avg
+        val_loss_final = val_loss_meter.avg
+        val_acc_final = val_acc_meter.avg
+        test_loss_final = test_loss_meter.avg
+        test_acc_final = test_acc_meter.avg
         
         # Log to wandb (same metrics as collective for consistency)
         wandb.log({
             'epoch': epoch,
-            'train/loss': avg_train_loss,
-            'train/loss_prediction': avg_train_loss,  # For baselines, total loss = prediction loss
-            'train/accuracy': train_acc,
-            'val/loss': avg_val_loss,
-            'val/accuracy': val_acc,
-            'test/loss': avg_test_loss,  # Also log test loss every epoch!
-            'test/accuracy': test_acc,
+            'train/loss': train_loss_final,
+            'train/loss_prediction': train_loss_final,  # For baselines, total loss = prediction loss
+            'train/accuracy': train_acc_final,
+            'val/loss': val_loss_final,
+            'val/accuracy': val_acc_final,
+            'test/loss': test_loss_final,
+            'test/accuracy': test_acc_final,
             'lr': optimizer.param_groups[0]['lr']
         })
         
         # Print progress
         print(f'Epoch {epoch+1}/{epochs}: '
-              f'Train Loss: {avg_train_loss:.4f}, Train Acc: {train_acc:.2f}%, '
-              f'Val Loss: {avg_val_loss:.4f}, Val Acc: {val_acc:.2f}%, '
-              f'Test Loss: {avg_test_loss:.4f}, Test Acc: {test_acc:.2f}%')
+              f'Train Loss: {train_loss_final:.4f}, Train Acc: {train_acc_final:.2f}%, '
+              f'Val Loss: {val_loss_final:.4f}, Val Acc: {val_acc_final:.2f}%, '
+              f'Test Loss: {test_loss_final:.4f}, Test Acc: {test_acc_final:.2f}%')
         
         # Save best model
-        if val_acc > best_val_acc:
-            best_val_acc = val_acc
+        if val_acc_final > best_val_acc:
+            best_val_acc = val_acc_final
     
     print(f'\nTraining complete! Best validation accuracy: {best_val_acc:.2f}%')
     
-    # Calculate parameter efficiency metrics
+    # Calculate parameter efficiency metrics (using final test metrics)
     model_params = count_parameters(model)
-    param_efficiency = (test_acc / model_params) * 100000  # Accuracy per 100K parameters
+    param_efficiency = (test_acc_final / model_params) * 100000  # Accuracy per 100K parameters
     
-    # Log final metrics including parameter efficiency
+    # Log final metrics including parameter efficiency (use final test metrics)
     wandb.log({
         'final/best_val_accuracy': best_val_acc,
-        'final/test_accuracy': test_acc,
+        'final/test_accuracy': test_acc_final,
+        'final/test_loss': test_loss_final,
         'final/model_params': model_params,
         'final/param_efficiency': param_efficiency,  # Acc per 100K params
-        'final/accuracy_per_million_params': (test_acc / model_params) * 1000000  # Acc per 1M params
+        'final/accuracy_per_million_params': (test_acc_final / model_params) * 1000000  # Acc per 1M params
+    })
+    
+    # Log final summary metrics to wandb summary
+    wandb.summary.update({
+        'best_val_accuracy': best_val_acc,
+        'final_test_accuracy': test_acc_final,
+        'final_test_loss': test_loss_final,
+        'model_params': model_params,
+        'param_efficiency': param_efficiency,
+        'accuracy_per_million_params': (test_acc_final / model_params) * 1000000
     })
     
     print(f'Parameter Efficiency: {param_efficiency:.2f} accuracy per 100K parameters')
@@ -306,6 +321,7 @@ def main():
     loaders, dataset_info = get_data_loaders(
         dataset_name=dataset_name,
         batch_size=config['batch_size'],
+        eval_batch_size=config.get('eval_batch_size', None),  # Use larger batch for val/test (smoother metrics)
         val_split=config.get('val_split', 0.1),
         num_workers=config.get('num_workers', 2),
         use_augmentation=config.get('use_augmentation', False)
