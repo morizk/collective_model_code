@@ -1,0 +1,162 @@
+# Wandb Sweep Configuration - COLLECTIVE MODEL ONLY
+# Fast hyperparameter tuning for collective architecture
+# Compare against baselines later after finding best collective config
+
+program: train.py
+method: bayes  # Bayesian optimization (smart search)
+
+metric:
+  goal: maximize
+  name: final/test_accuracy
+
+parameters:
+  # =============================================================================
+  # MODEL TYPE - COLLECTIVE ONLY
+  # =============================================================================
+  model_type:
+    value: collective  # ONLY collective model
+
+  # =============================================================================
+  # FIXED PARAMETERS (Fashion-MNIST)
+  # =============================================================================
+  dataset:
+    value: fashion_mnist  # Much harder than MNIST (88-92% vs 98%+)
+  input_dim:
+    value: 784
+  num_classes:
+    value: 10
+  device:
+    value: cuda
+  seed:
+    value: 42
+
+  # =============================================================================
+  # TRAINING PARAMETERS (SHARED - tune these)
+  # =============================================================================
+  epochs:
+    value: 200  # Fixed for fair comparison
+  
+  batch_size:
+    values: [128, 256]  # Optimized batch sizes
+  
+  learning_rate:
+    distribution: log_uniform_values
+    min: 0.0001
+    max: 0.01
+  
+  optimizer:
+    values: [adam, adamw]
+  
+  weight_decay:
+    values: [0.0, 0.0001, 0.001]
+  
+  use_augmentation:
+    values: [true, false]
+
+  # =============================================================================
+  # COLLECTIVE ARCHITECTURE PARAMETERS (CORE - tune these!)
+  # =============================================================================
+  
+  # Number of models
+  n_total:
+    values: [6, 8, 10, 12]  # Total experts + analysts
+  
+  expert_ratio:
+    distribution: uniform
+    min: 0.1
+    max: 0.4  # 10-40% experts (rest are analysts)
+  
+  # Expert architecture
+  expert_hidden:
+    values:
+      - [512, 256]      # Standard
+      - [768, 384]      # Larger
+      - [384, 192]      # Smaller
+      - [512, 256, 128] # Deeper
+  
+  expert_output:
+    values: [64, 128, 256]
+  
+  # Analyst architecture
+  analyst_hidden:
+    values:
+      - [256, 128]      # Standard
+      - [384, 192]      # Larger
+      - [192, 96]       # Smaller
+      - [256, 128, 64]  # Deeper
+  
+  analyst_output:
+    values: [32, 64, 128]
+  
+  # Compression ratios
+  c_expert:
+    values: [0.1, 0.25, 0.5]  # Expert encoder compression
+  
+  c_collective:
+    values: [0.1, 0.25, 0.5]  # Collective encoder compression (if encoder_head)
+  
+  # Collective architecture
+  collective_version:
+    values: [simple_mlp]  # Phase 1: Only simple_mlp (encoder_head for Phase 2)
+  
+  collective_hidden_scale:
+    values: [0.5, 1.0, 1.5]
+
+  # =============================================================================
+  # DIVERSITY PARAMETERS (COLLECTIVE-SPECIFIC)
+  # =============================================================================
+  
+  use_expert_diversity:
+    values: [true, false]
+  
+  use_analyst_diversity:
+    values: [true, false]
+  
+  diversity_lambda:
+    values: [0.0, 0.001, 0.01, 0.05]  # 0.0 = off
+  
+  diversity_temperature:
+    values: [0.1, 1.0, 5.0]
+  
+  vary_expert_architectures:
+    values: [true, false]
+  
+  vary_analyst_architectures:
+    values: [true, false]
+
+  # =============================================================================
+  # DERIVED PARAMETERS (DO NOT SET - computed automatically)
+  # =============================================================================
+  # These are computed by prepare_config():
+  # - n_experts (from n_total * expert_ratio)
+  # - n_analysts (from n_total - n_experts)
+  # - expert_encoder_output_dim
+  # - analyst_input_dim
+  # - collective_input_dim
+
+# =============================================================================
+# EARLY TERMINATION (Hyperband - stop bad runs early)
+# =============================================================================
+early_terminate:
+  type: hyperband
+  min_iter: 20      # All runs get at least 20 epochs
+  max_iter: 200     # Best runs go to 200 epochs
+  s: 2
+  eta: 3            # Keep top 1/3 at each stage
+
+# =============================================================================
+# SEARCH STRATEGY NOTES
+# =============================================================================
+# Bayesian optimization will:
+# 1. Explore different configurations intelligently
+# 2. Focus on promising hyperparameter regions
+# 3. Stop bad runs early (saves time!)
+# 4. Find best collective architecture
+#
+# Expected time (1 GPU):
+# - ~30-50 configs tested
+# - ~20-30 hours total (with early stopping)
+# - Best config found for collective model
+#
+# Then: Compare best collective vs 6 baselines separately
+
