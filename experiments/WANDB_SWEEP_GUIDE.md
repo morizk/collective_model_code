@@ -72,19 +72,19 @@ After creating the sweep, run agents:
 
 ```bash
 # Use the ACTUAL sweep ID from wandb output
-# Example: morizk/collective_model_code/bvplca5y
+# Current sweep ID: morizk/collective_model_code/ydnjncz0
 
 # Terminal 1 (or script)
-wandb agent morizk/collective_model_code/bvplca5y
+wandb agent morizk/collective_model_code/ydnjncz0
 
 # Terminal 2 (if you have multiple GPUs)
-wandb agent morizk/collective_model_code/bvplca5y
+wandb agent morizk/collective_model_code/ydnjncz0
 
 # Terminal 3 (if you have multiple GPUs)
-wandb agent morizk/collective_model_code/bvplca5y
+wandb agent morizk/collective_model_code/ydnjncz0
 ```
 
-**Important**: Replace `morizk/collective_model_code/bvplca5y` with your actual sweep ID!
+**Current Sweep ID**: `morizk/collective_model_code/ydnjncz0`
 
 Each agent will:
 - Pull a new hyperparameter configuration
