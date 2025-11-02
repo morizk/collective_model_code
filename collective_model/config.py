@@ -131,20 +131,26 @@ def prepare_config(config):
     n_total = config['n_total']
     
     # Support both expert_ratio (old) and n_experts (new, preferred)
+    # IMPORTANT: Always ensure at least 2 experts (needed for diversity loss)
     if 'n_experts' in config:
         # New way: n_experts specified directly
-        n_experts = max(1, min(int(config['n_experts']), n_total - 1))  # Ensure at least 1 analyst
+        n_experts = max(2, min(int(config['n_experts']), n_total - 1))  # Minimum 2 experts, ensure at least 1 analyst
         # Also compute expert_ratio for backwards compatibility
         if 'expert_ratio' not in config:
             config['expert_ratio'] = n_experts / n_total
     elif 'expert_ratio' in config:
         # Old way: expert_ratio specified, compute n_experts
         expert_ratio = config['expert_ratio']
-        n_experts = max(1, round(n_total * expert_ratio))
+        n_experts_calculated = round(n_total * expert_ratio)
+        n_experts = max(2, n_experts_calculated)  # Minimum 2 experts (needed for diversity loss)
     else:
         raise ValueError("Either 'n_experts' or 'expert_ratio' must be specified in config")
     
-    n_analysts = max(1, n_total - n_experts)
+    # Ensure we have at least 1 analyst (adjust n_experts if needed to maintain n_total)
+    if n_experts >= n_total:
+        n_experts = n_total - 1  # Leave room for at least 1 analyst
+    
+    n_analysts = n_total - n_experts  # Adjust analysts to maintain n_total
     
     config['n_experts'] = n_experts
     config['n_analysts'] = n_analysts
@@ -228,8 +234,8 @@ def validate_config(config):
     if 'n_experts' in config:
         n_total = config.get('n_total', 0)
         n_experts = config['n_experts']
-        if not (1 <= n_experts < n_total):
-            errors.append(f"n_experts must be between 1 and {n_total-1} (must leave room for at least 1 analyst)")
+        if not (2 <= n_experts < n_total):  # Minimum 2 experts (needed for diversity loss)
+            errors.append(f"n_experts must be between 2 and {n_total-1} (minimum 2 for diversity, must leave room for at least 1 analyst)")
     
     # Ensure at least one method is provided
     if 'expert_ratio' not in config and 'n_experts' not in config:
