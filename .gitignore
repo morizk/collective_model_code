@@ -20,9 +20,12 @@ __pycache__/
 *.pt
 *.ckpt
 
-# Data
-data/
-datasets/
+# Data (dataset storage directories, not package code)
+/data/
+/datasets/
+# But allow package directories:
+!collective_model/data/
+!baselines/data/
 *.csv
 *.json
 
