@@ -227,20 +227,59 @@ def get_fashion_mnist_loaders(
         transforms.Lambda(lambda x: x.view(-1))  # Flatten 28x28 -> 784
     ])
     
-    # Download/load datasets
-    train_dataset = datasets.FashionMNIST(
-        root=data_dir,
-        train=True,
-        download=True,
-        transform=train_transform
-    )
+    # Download/load datasets with error handling
+    import shutil
+    fashion_mnist_dir = os.path.join(data_dir, 'FashionMNIST')
     
-    test_dataset = datasets.FashionMNIST(
-        root=data_dir,
-        train=False,
-        download=True,
-        transform=test_transform
-    )
+    try:
+        train_dataset = datasets.FashionMNIST(
+            root=data_dir,
+            train=True,
+            download=True,
+            transform=train_transform
+        )
+    except (RuntimeError, Exception) as e:
+        if "corrupted" in str(e).lower() or "not found" in str(e).lower():
+            print(f"⚠️  Download failed or corrupted. Cleaning up and retrying...")
+            # Remove potentially corrupted files
+            raw_folder = os.path.join(fashion_mnist_dir, 'raw')
+            if os.path.exists(raw_folder):
+                shutil.rmtree(raw_folder)
+                print(f"   Removed corrupted files from {raw_folder}")
+            # Retry download
+            train_dataset = datasets.FashionMNIST(
+                root=data_dir,
+                train=True,
+                download=True,
+                transform=train_transform
+            )
+        else:
+            raise
+    
+    try:
+        test_dataset = datasets.FashionMNIST(
+            root=data_dir,
+            train=False,
+            download=True,
+            transform=test_transform
+        )
+    except (RuntimeError, Exception) as e:
+        if "corrupted" in str(e).lower() or "not found" in str(e).lower():
+            print(f"⚠️  Test set download failed or corrupted. Cleaning up and retrying...")
+            # Remove potentially corrupted files
+            raw_folder = os.path.join(fashion_mnist_dir, 'raw')
+            if os.path.exists(raw_folder):
+                shutil.rmtree(raw_folder)
+                print(f"   Removed corrupted files from {raw_folder}")
+            # Retry download
+            test_dataset = datasets.FashionMNIST(
+                root=data_dir,
+                train=False,
+                download=True,
+                transform=test_transform
+            )
+        else:
+            raise
     
     # Split training set into train and validation
     train_size = len(train_dataset)
