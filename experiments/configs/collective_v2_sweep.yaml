@@ -1,6 +1,13 @@
-# Wandb Sweep Configuration - COLLECTIVE MODEL ONLY
-# Fast hyperparameter tuning for collective architecture
-# Compare against baselines later after finding best collective config
+# Wandb Sweep Configuration - COLLECTIVE MODEL V2
+# Optimized based on sweep insights from v1
+# Changes:
+# - adamw only (adam removed)
+# - use_expert_diversity=true (default)
+# - Reduced learning_rate range (0.0001-0.006)
+# - Increased batch_size (512, 1024)
+# - Use n_experts directly (1-4) instead of expert_ratio
+# - 125 epochs
+# - Only log-scaled efficiency metrics
 
 program: train.py
 method: bayes  # Bayesian optimization (smart search)
@@ -31,15 +38,15 @@ parameters:
     value: 42
 
   # =============================================================================
-  # TRAINING PARAMETERS (SHARED - tune these)
+  # TRAINING PARAMETERS (OPTIMIZED BASED ON SWEEP INSIGHTS)
   # =============================================================================
   epochs:
-    value: 125  # Reduced based on sweep insights (faster iteration)
+    value: 125  # Reduced for faster iteration
   
   batch_size:
-    values: [512, 1024]  # Increased based on sweep insights (better performance)
+    values: [512, 1024]  # Increased based on sweep insights
   eval_batch_size:
-    values: [1024, 2048]  # Larger batch for validation/test (smoother metrics)
+    values: [1024, 2048]  # Larger batch for validation/test
   
   learning_rate:
     distribution: log_uniform_values
@@ -56,7 +63,7 @@ parameters:
     value: true  # Default: Use data augmentation
 
   # =============================================================================
-  # COLLECTIVE ARCHITECTURE PARAMETERS (CORE - tune these!)
+  # COLLECTIVE ARCHITECTURE PARAMETERS
   # =============================================================================
   
   # Number of models
@@ -96,21 +103,21 @@ parameters:
     values: [0.1, 0.25, 0.5]  # Expert encoder compression
   
   c_collective:
-    values: [0.1, 0.25, 0.5]  # Collective encoder compression (if encoder_head)
+    values: [0.1, 0.25, 0.5]  # Collective encoder compression
   
   # Collective architecture
   collective_version:
-    values: [simple_mlp]  # Phase 1: Only simple_mlp (encoder_head for Phase 2)
+    value: simple_mlp  # Phase 1: Only simple_mlp
   
   collective_hidden_scale:
     values: [0.5, 1.0, 1.5]
 
   # =============================================================================
-  # DIVERSITY PARAMETERS (COLLECTIVE-SPECIFIC)
+  # DIVERSITY PARAMETERS (OPTIMIZED)
   # =============================================================================
   
   use_expert_diversity:
-    value: true  # Default true based on sweep insights (helps performance)
+    value: true  # Default true - helps performance
   
   use_analyst_diversity:
     values: [true, false]
@@ -119,7 +126,7 @@ parameters:
     values: [0.0, 0.001, 0.01, 0.05]  # 0.0 = off
   
   diversity_temperature:
-    values: [0.1, 1.0, 5.0]  # Negative correlation found - helps performance, keep range
+    values: [0.1, 1.0, 5.0]  # Negative correlation found - helps performance
   
   vary_expert_architectures:
     values: [true, false]
@@ -143,23 +150,20 @@ parameters:
 early_terminate:
   type: hyperband
   min_iter: 20      # All runs get at least 20 epochs
-  max_iter: 125     # Best runs go to 125 epochs (reduced based on sweep insights)
+  max_iter: 125     # Best runs go to 125 epochs
   s: 2
   eta: 3            # Keep top 1/3 at each stage
 
 # =============================================================================
-# SEARCH STRATEGY NOTES
+# SWEEP INSIGHTS APPLIED
 # =============================================================================
-# Bayesian optimization will:
-# 1. Explore different configurations intelligently
-# 2. Focus on promising hyperparameter regions
-# 3. Stop bad runs early (saves time!)
-# 4. Find best collective architecture
-#
-# Expected time (1 GPU):
-# - ~30-50 configs tested
-# - ~20-30 hours total (with early stopping)
-# - Best config found for collective model
-#
-# Then: Compare best collective vs 6 baselines separately
+# Based on v1 sweep results:
+# 1. adamw > adam (now fixed)
+# 2. use_expert_diversity=true helps (now default)
+# 3. Larger batch_size (512-1024) performs better
+# 4. Lower learning_rate range (0.0001-0.006) better
+# 5. Lower expert_ratio (0.1-0.35) performs better than higher ratios
+# 6. diversity_temperature shows negative correlation (helps, keep range)
+# 7. Only log-scaled efficiency metrics (reduce clutter)
+# 8. Fixed loss efficiency calculation (lower is better, not inverse)
 

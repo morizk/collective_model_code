@@ -129,10 +129,21 @@ def prepare_config(config):
     
     # Compute number of experts and analysts
     n_total = config['n_total']
-    expert_ratio = config['expert_ratio']
     
-    # Round to nearest integer, ensure at least 1 of each
-    n_experts = max(1, round(n_total * expert_ratio))
+    # Support both expert_ratio (old) and n_experts (new, preferred)
+    if 'n_experts' in config:
+        # New way: n_experts specified directly
+        n_experts = max(1, min(int(config['n_experts']), n_total - 1))  # Ensure at least 1 analyst
+        # Also compute expert_ratio for backwards compatibility
+        if 'expert_ratio' not in config:
+            config['expert_ratio'] = n_experts / n_total
+    elif 'expert_ratio' in config:
+        # Old way: expert_ratio specified, compute n_experts
+        expert_ratio = config['expert_ratio']
+        n_experts = max(1, round(n_total * expert_ratio))
+    else:
+        raise ValueError("Either 'n_experts' or 'expert_ratio' must be specified in config")
+    
     n_analysts = max(1, n_total - n_experts)
     
     config['n_experts'] = n_experts
@@ -208,8 +219,21 @@ def validate_config(config):
     if config['n_total'] < 2:
         errors.append("n_total must be at least 2")
     
-    if not (0 < config['expert_ratio'] < 1):
-        errors.append("expert_ratio must be between 0 and 1")
+    # Validate expert_ratio if provided (backwards compatibility)
+    if 'expert_ratio' in config:
+        if not (0 < config['expert_ratio'] < 1):
+            errors.append("expert_ratio must be between 0 and 1")
+    
+    # Validate n_experts if provided (new preferred method)
+    if 'n_experts' in config:
+        n_total = config.get('n_total', 0)
+        n_experts = config['n_experts']
+        if not (1 <= n_experts < n_total):
+            errors.append(f"n_experts must be between 1 and {n_total-1} (must leave room for at least 1 analyst)")
+    
+    # Ensure at least one method is provided
+    if 'expert_ratio' not in config and 'n_experts' not in config:
+        errors.append("Either 'expert_ratio' or 'n_experts' must be specified")
     
     if config['batch_size'] < 1:
         errors.append("batch_size must be positive")
