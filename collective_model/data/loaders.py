@@ -227,59 +227,62 @@ def get_fashion_mnist_loaders(
         transforms.Lambda(lambda x: x.view(-1))  # Flatten 28x28 -> 784
     ])
     
-    # Download/load datasets with error handling
+    # Download/load datasets with robust error handling
     import shutil
+    import time
     fashion_mnist_dir = os.path.join(data_dir, 'FashionMNIST')
+    raw_folder = os.path.join(fashion_mnist_dir, 'raw')
     
-    try:
-        train_dataset = datasets.FashionMNIST(
+    # Helper function to download with retries
+    def download_with_retries(download_func, dataset_name="dataset", max_retries=3):
+        for attempt in range(max_retries):
+            try:
+                return download_func()
+            except (RuntimeError, Exception) as e:
+                error_msg = str(e).lower()
+                if "corrupted" in error_msg or "not found" in error_msg:
+                    if attempt < max_retries - 1:
+                        print(f"⚠️  {dataset_name} download failed (attempt {attempt + 1}/{max_retries}). Cleaning up and retrying...")
+                        # Remove potentially corrupted files
+                        if os.path.exists(raw_folder):
+                            shutil.rmtree(raw_folder)
+                            print(f"   Removed corrupted files from {raw_folder}")
+                        # Wait a bit before retrying (exponential backoff)
+                        time.sleep(2 ** attempt)
+                    else:
+                        print(f"❌ {dataset_name} download failed after {max_retries} attempts.")
+                        print(f"   This is likely a network/server issue.")
+                        print(f"   Manual fix: Delete '{raw_folder}' and ensure you have internet connectivity.")
+                        print(f"   Or download manually from: http://fashion-mnist.s3-website.eu-central-1.amazonaws.com/")
+                        raise RuntimeError(
+                            f"Failed to download {dataset_name} after {max_retries} attempts. "
+                            f"Please check your internet connection or manually download the dataset."
+                        )
+                else:
+                    # Different error, don't retry
+                    raise
+    
+    # Download training set
+    def download_train():
+        return datasets.FashionMNIST(
             root=data_dir,
             train=True,
             download=True,
             transform=train_transform
         )
-    except (RuntimeError, Exception) as e:
-        if "corrupted" in str(e).lower() or "not found" in str(e).lower():
-            print(f"⚠️  Download failed or corrupted. Cleaning up and retrying...")
-            # Remove potentially corrupted files
-            raw_folder = os.path.join(fashion_mnist_dir, 'raw')
-            if os.path.exists(raw_folder):
-                shutil.rmtree(raw_folder)
-                print(f"   Removed corrupted files from {raw_folder}")
-            # Retry download
-            train_dataset = datasets.FashionMNIST(
-                root=data_dir,
-                train=True,
-                download=True,
-                transform=train_transform
-            )
-        else:
-            raise
     
-    try:
-        test_dataset = datasets.FashionMNIST(
+    train_dataset = download_with_retries(download_train, "Training set")
+    
+    # Download test set
+    def download_test():
+        return datasets.FashionMNIST(
             root=data_dir,
             train=False,
             download=True,
             transform=test_transform
         )
-    except (RuntimeError, Exception) as e:
-        if "corrupted" in str(e).lower() or "not found" in str(e).lower():
-            print(f"⚠️  Test set download failed or corrupted. Cleaning up and retrying...")
-            # Remove potentially corrupted files
-            raw_folder = os.path.join(fashion_mnist_dir, 'raw')
-            if os.path.exists(raw_folder):
-                shutil.rmtree(raw_folder)
-                print(f"   Removed corrupted files from {raw_folder}")
-            # Retry download
-            test_dataset = datasets.FashionMNIST(
-                root=data_dir,
-                train=False,
-                download=True,
-                transform=test_transform
-            )
-        else:
-            raise
+    
+    test_dataset = download_with_retries(download_test, "Test set")
     
     # Split training set into train and validation
     train_size = len(train_dataset)
