@@ -494,6 +494,7 @@ def train_strategy_c(config, train_loader, val_loader, test_loader=None):
             'final/accuracy_per_million_params': accuracy_per_million,
             'accuracy_per_million_params': accuracy_per_million,
             'final/accuracy_per_log10_params': accuracy_per_log_params,
+            'final/param_efficiency/test_accuracy_per_log10_params': accuracy_per_log_params,  # For sweep optimization
             # Loss efficiency metrics (inverse - higher is better)
             'final/loss_efficiency_per_100k_params': loss_efficiency,
             'final/loss_efficiency_per_1m_params': loss_efficiency_million,
@@ -510,6 +511,7 @@ def train_strategy_c(config, train_loader, val_loader, test_loader=None):
             'final/param_efficiency': param_efficiency,
             'final/accuracy_per_million_params': accuracy_per_million,
             'final/accuracy_per_log10_params': accuracy_per_log_params,
+            'final/param_efficiency/test_accuracy_per_log10_params': accuracy_per_log_params,  # For sweep optimization
             'final/loss_per_log10_params': loss_efficiency_log  # Only log-scaled (reduce clutter)
         })
         

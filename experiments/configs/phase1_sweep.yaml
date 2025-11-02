@@ -5,8 +5,8 @@ program: train.py
 method: bayes  # Bayesian optimization (smart search)
 
 metric:
-  goal: maximize  # CRITICAL: Maximize accuracy, not minimize time!
-  name: final/test_accuracy  # Use final logged metric for sweep optimization
+  goal: maximize  # Optimize for parameter efficiency (log-scaled)
+  name: param_efficiency/test_accuracy_per_log10_params  # Balances accuracy with model size
 
 parameters:
   # =============================================================================

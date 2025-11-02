@@ -168,8 +168,11 @@ def train_baseline(config, model, train_loader, val_loader, test_loader, device)
     print(f'\nTraining complete! Best validation accuracy: {best_val_acc:.2f}%')
     
     # Calculate parameter efficiency metrics (using final test metrics)
+    import math
     model_params = count_parameters(model)
     param_efficiency = (test_acc_final / model_params) * 100000  # Accuracy per 100K parameters
+    accuracy_per_million = (test_acc_final / model_params) * 1000000  # Accuracy per 1M params
+    accuracy_per_log10_params = test_acc_final / math.log10(model_params + 1)  # Log-scaled (better for large ranges)
     
     # Log final metrics including parameter efficiency (use final test metrics)
     wandb.log({
@@ -178,7 +181,10 @@ def train_baseline(config, model, train_loader, val_loader, test_loader, device)
         'final/test_loss': test_loss_final,
         'final/model_params': model_params,
         'final/param_efficiency': param_efficiency,  # Acc per 100K params
-        'final/accuracy_per_million_params': (test_acc_final / model_params) * 1000000  # Acc per 1M params
+        'final/accuracy_per_million_params': accuracy_per_million,  # Acc per 1M params
+        'final/accuracy_per_log10_params': accuracy_per_log10_params,
+        'param_efficiency/test_accuracy_per_log10_params': accuracy_per_log10_params,  # For sweep optimization
+        'final/param_efficiency/test_accuracy_per_log10_params': accuracy_per_log10_params  # For sweep optimization
     })
     
     # Log final summary metrics to wandb summary
@@ -188,7 +194,9 @@ def train_baseline(config, model, train_loader, val_loader, test_loader, device)
         'final_test_loss': test_loss_final,
         'model_params': model_params,
         'param_efficiency': param_efficiency,
-        'accuracy_per_million_params': (test_acc_final / model_params) * 1000000
+        'accuracy_per_million_params': accuracy_per_million,
+        'accuracy_per_log10_params': accuracy_per_log10_params,
+        'param_efficiency/test_accuracy_per_log10_params': accuracy_per_log10_params
     })
     
     print(f'Parameter Efficiency: {param_efficiency:.2f} accuracy per 100K parameters')

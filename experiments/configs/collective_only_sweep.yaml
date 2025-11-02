@@ -7,7 +7,7 @@ method: bayes  # Bayesian optimization (smart search)
 
 metric:
   goal: maximize
-  name: final/test_accuracy
+  name: param_efficiency/test_accuracy_per_log10_params  # Optimize for parameter efficiency (log-scaled)
 
 parameters:
   # =============================================================================
