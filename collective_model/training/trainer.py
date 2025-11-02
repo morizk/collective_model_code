@@ -303,19 +303,43 @@ def train_strategy_c(config, train_loader, val_loader, test_loader=None):
         
         # Log parameter efficiency metrics EVERY EPOCH (for graphs in wandb)
         # Use TRUE parameter count from model (not calculated)
+        # Better scaling: Use log scale to handle large parameter differences (1M vs 7M)
+        import math
+        
+        # Accuracy efficiency (higher is better)
         param_efficiency_100k = (val_metrics['accuracy'] / model_params_true) * 100000  # Accuracy per 100K params
         param_efficiency_1m = (val_metrics['accuracy'] / model_params_true) * 1000000  # Accuracy per 1M params
+        # Log-scaled efficiency (accounts for large param differences better)
+        param_efficiency_log = val_metrics['accuracy'] / math.log10(model_params_true + 1)  # Accuracy per log10(params)
+        
+        # Loss efficiency (lower is better, so use inverse)
+        loss_efficiency_100k = (1.0 / (val_metrics['loss'] + 1e-8)) / model_params_true * 100000  # Inverse loss per 100K params
+        loss_efficiency_1m = (1.0 / (val_metrics['loss'] + 1e-8)) / model_params_true * 1000000  # Inverse loss per 1M params
+        loss_efficiency_log = (1.0 / (val_metrics['loss'] + 1e-8)) / math.log10(model_params_true + 1)  # Inverse loss per log10(params)
         
         log_dict['param_efficiency/accuracy_per_100k_params'] = param_efficiency_100k
         log_dict['param_efficiency/accuracy_per_1m_params'] = param_efficiency_1m
+        log_dict['param_efficiency/accuracy_per_log10_params'] = param_efficiency_log
+        log_dict['param_efficiency/loss_efficiency_per_100k_params'] = loss_efficiency_100k
+        log_dict['param_efficiency/loss_efficiency_per_1m_params'] = loss_efficiency_1m
+        log_dict['param_efficiency/loss_efficiency_per_log10_params'] = loss_efficiency_log
         log_dict['model_params'] = model_params_true  # Log true param count as metric (not hyperparameter)
         
         # Also log test parameter efficiency if available
         if test_metrics_epoch is not None:
             test_param_efficiency_100k = (test_metrics_epoch['accuracy'] / model_params_true) * 100000
             test_param_efficiency_1m = (test_metrics_epoch['accuracy'] / model_params_true) * 1000000
+            test_param_efficiency_log = test_metrics_epoch['accuracy'] / math.log10(model_params_true + 1)
+            test_loss_efficiency_100k = (1.0 / (test_metrics_epoch['loss'] + 1e-8)) / model_params_true * 100000
+            test_loss_efficiency_1m = (1.0 / (test_metrics_epoch['loss'] + 1e-8)) / model_params_true * 1000000
+            test_loss_efficiency_log = (1.0 / (test_metrics_epoch['loss'] + 1e-8)) / math.log10(model_params_true + 1)
+            
             log_dict['param_efficiency/test_accuracy_per_100k_params'] = test_param_efficiency_100k
             log_dict['param_efficiency/test_accuracy_per_1m_params'] = test_param_efficiency_1m
+            log_dict['param_efficiency/test_accuracy_per_log10_params'] = test_param_efficiency_log
+            log_dict['param_efficiency/test_loss_efficiency_per_100k_params'] = test_loss_efficiency_100k
+            log_dict['param_efficiency/test_loss_efficiency_per_1m_params'] = test_loss_efficiency_1m
+            log_dict['param_efficiency/test_loss_efficiency_per_log10_params'] = test_loss_efficiency_log
         
         wandb.log(log_dict)
         
@@ -357,20 +381,38 @@ def train_strategy_c(config, train_loader, val_loader, test_loader=None):
     }
     
     if final_test_metrics:
+        import math
         test_acc_final = final_test_metrics['accuracy']
         test_loss_final = final_test_metrics['loss']
+        
+        # Multiple efficiency metrics with better scaling
         param_efficiency = (test_acc_final / model_params_true) * 100000  # Accuracy per 100K parameters (TRUE count)
         accuracy_per_million = (test_acc_final / model_params_true) * 1000000  # Accuracy per 1M parameters (TRUE count)
+        accuracy_per_log_params = test_acc_final / math.log10(model_params_true + 1)  # Log-scaled (better for large ranges)
+        
+        # Loss efficiency (inverse, so higher is better)
+        loss_efficiency = (1.0 / (test_loss_final + 1e-8)) / model_params_true * 100000  # Inverse loss per 100K params
+        loss_efficiency_million = (1.0 / (test_loss_final + 1e-8)) / model_params_true * 1000000  # Inverse loss per 1M params
+        loss_efficiency_log = (1.0 / (test_loss_final + 1e-8)) / math.log10(model_params_true + 1)  # Log-scaled
         
         final_summary.update({
             'final_test_accuracy': test_acc_final,
             'final_test_loss': test_loss_final,
             'final/test_accuracy': test_acc_final,
             'final/test_loss': test_loss_final,
+            # Accuracy efficiency metrics
             'final/param_efficiency': param_efficiency,  # Acc per 100K params
             'param_efficiency': param_efficiency,
             'final/accuracy_per_million_params': accuracy_per_million,
-            'accuracy_per_million_params': accuracy_per_million
+            'accuracy_per_million_params': accuracy_per_million,
+            'final/accuracy_per_log10_params': accuracy_per_log_params,
+            # Loss efficiency metrics (inverse - higher is better)
+            'final/loss_efficiency_per_100k_params': loss_efficiency,
+            'final/loss_efficiency_per_1m_params': loss_efficiency_million,
+            'final/loss_efficiency_per_log10_params': loss_efficiency_log,
+            'loss_efficiency_per_100k_params': loss_efficiency,
+            'loss_efficiency_per_1m_params': loss_efficiency_million,
+            'loss_efficiency_per_log10_params': loss_efficiency_log
         })
         
         # Also log as metrics for sweep optimization
@@ -378,11 +420,21 @@ def train_strategy_c(config, train_loader, val_loader, test_loader=None):
             'final/test_accuracy': test_acc_final,
             'final/test_loss': test_loss_final,
             'final/param_efficiency': param_efficiency,
-            'final/accuracy_per_million_params': accuracy_per_million
+            'final/accuracy_per_million_params': accuracy_per_million,
+            'final/accuracy_per_log10_params': accuracy_per_log_params,
+            'final/loss_efficiency_per_100k_params': loss_efficiency,
+            'final/loss_efficiency_per_1m_params': loss_efficiency_million,
+            'final/loss_efficiency_per_log10_params': loss_efficiency_log
         })
         
-        print(f"\nParameter Efficiency: {param_efficiency:.2f} accuracy per 100K parameters")
-        print(f"Accuracy per Million Params: {accuracy_per_million:.2f}")
+        print(f"\nParameter Efficiency (Accuracy):")
+        print(f"  Per 100K params: {param_efficiency:.2f} accuracy")
+        print(f"  Per 1M params: {accuracy_per_million:.2f} accuracy")
+        print(f"  Per log10(params): {accuracy_per_log_params:.2f} accuracy")
+        print(f"\nParameter Efficiency (Loss - inverse, higher is better):")
+        print(f"  Per 100K params: {loss_efficiency:.2f}")
+        print(f"  Per 1M params: {loss_efficiency_million:.2f}")
+        print(f"  Per log10(params): {loss_efficiency_log:.2f}")
     
     wandb.summary.update(final_summary)
     wandb.finish()
