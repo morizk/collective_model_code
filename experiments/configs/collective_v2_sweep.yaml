@@ -44,9 +44,9 @@ parameters:
     value: 125  # Reduced for faster iteration
   
   batch_size:
-    values: [512, 1024]  # Increased based on sweep insights
+    values: [128, 256]  # Reverted - wandb shows 128 performs better
   eval_batch_size:
-    values: [1024, 2048]  # Larger batch for validation/test
+    values: [512, 1024]  # Larger batch for validation/test (smoother metrics)
   
   learning_rate:
     distribution: log_uniform_values
@@ -68,7 +68,7 @@ parameters:
   
   # Number of models
   n_total:
-    values: [6, 8, 10, 12]  # Total experts + analysts
+    values: [ 10, 12 ,14, 16]  # Total experts + analysts
   
   # Expert ratio (scales with n_total - more adaptable than fixed n_experts)
   expert_ratio:
@@ -160,7 +160,7 @@ early_terminate:
 # Based on v1 sweep results:
 # 1. adamw > adam (now fixed)
 # 2. use_expert_diversity=true helps (now default)
-# 3. Larger batch_size (512-1024) performs better
+# 3. batch_size=128 performs better (reverted from 512-1024 based on wandb results)
 # 4. Lower learning_rate range (0.0001-0.006) better
 # 5. Lower expert_ratio (0.1-0.35) performs better than higher ratios
 # 6. diversity_temperature shows negative correlation (helps, keep range)
