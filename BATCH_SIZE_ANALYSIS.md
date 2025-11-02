@@ -72,3 +72,4 @@ The observation that **batch_size=128 performs better** is consistent with:
 - "Stochastic Gradient Descent with Large Minibatches" (Goyal et al., 2017)
 - General wisdom: smaller batches = better generalization in many cases
 
+

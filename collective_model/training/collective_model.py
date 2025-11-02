@@ -93,12 +93,24 @@ class CollectiveModel(nn.Module):
             )
         )
         
-        # Create collective layer
+        # Create analyst encoder (compresses analyst outputs to adaptive dimension)
+        analyst_concat_dim = config['n_analysts'] * config['analyst_output']
+        adaptive_dim = config['adaptive_collective_base_dim']
+        collective_input_dim = config['collective_input_dim']  # Already has c_collective applied
+        
+        self.analyst_encoder = Encoder(
+            input_dim=analyst_concat_dim,
+            output_dim=collective_input_dim,
+            use_batchnorm=True,
+            dropout=0.1
+        )
+        
+        # Create collective layer (now receives fixed-size adaptive input)
         self.collective = create_collective(
             collective_version=config['collective_version'],
-            input_dim=config['collective_input_dim'],
+            input_dim=collective_input_dim,  # Adaptive dimension (after c_collective multiplier)
             num_classes=config['num_classes'],
-            c_collective=config.get('c_collective', 0.25),
+            c_collective=config.get('c_collective', 1.0),  # Not used for input_dim, but for v2 compatibility
             hidden_scale=config.get('collective_hidden_scale', 1.0),
             dropout=0.2
         )
@@ -124,6 +136,8 @@ class CollectiveModel(nn.Module):
             x = x.view(batch_size, -1)
         
         # 1. Expert layer: Extract rich features
+        # Note: Sequential loop is fine - PyTorch GPU operations are already parallelized
+        # CUDA streams add overhead for small operations, so we keep it simple
         expert_outputs = []
         for expert in self.experts:
             expert_out = expert(x)
@@ -138,6 +152,8 @@ class CollectiveModel(nn.Module):
         # 3. Analyst layer: Synthesize expert opinions with input
         analyst_input = torch.cat([x, encoded_experts], dim=1)
         
+        # Note: Sequential loop is fine - PyTorch GPU operations are already parallelized
+        # CUDA streams add overhead for small operations, so we keep it simple
         analyst_outputs = []
         for analyst in self.analysts:
             analyst_out = analyst(analyst_input)
@@ -146,8 +162,11 @@ class CollectiveModel(nn.Module):
         # Concatenate analyst outputs
         analyst_concat = torch.cat(analyst_outputs, dim=1)
         
-        # 4. Collective layer: Final aggregation
-        logits = self.collective(analyst_concat)
+        # 3.5. Analyst Encoder: Compress analyst outputs to adaptive dimension
+        encoded_analysts = self.analyst_encoder(analyst_concat)
+        
+        # 4. Collective layer: Final aggregation (receives fixed-size adaptive input)
+        logits = self.collective(encoded_analysts)
         
         if return_intermediates:
             return logits, expert_outputs, analyst_outputs
@@ -185,6 +204,8 @@ if __name__ == '__main__':
     print(f"  n_experts={config['n_experts']}, n_analysts={config['n_analysts']}")
     print(f"  expert_encoder_output_dim={config['expert_encoder_output_dim']}")
     print(f"  analyst_input_dim={config['analyst_input_dim']}")
+    print(f"  adaptive_collective_base_dim={config.get('adaptive_collective_base_dim', 'N/A')}")
+    print(f"  collective_input_dim={config['collective_input_dim']}")
     
     # Create model
     print("\nCreating model...")

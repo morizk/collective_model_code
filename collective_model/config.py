@@ -21,7 +21,9 @@ CONFIG_DEBUG = {
     'analyst_hidden': [64, 32],  # Analyst hidden layers (SMALLER)
     'analyst_output': 16,  # Analyst output dimension
     'c_expert': 0.25,  # Expert encoder compression ratio
-    'c_collective': 0.25,  # Collective encoder compression ratio (for v2)
+    'c_collective': 1.0,  # Multiplier for adaptive collective input dimension
+    'adaptive_collective_min_dim': 64,  # Extreme min bound (will be manually engineered)
+    'adaptive_collective_max_dim': 2048,  # Extreme max bound (will be manually engineered)
     'collective_version': 'simple_mlp',  # 'simple_mlp' or 'encoder_head'
     'collective_hidden_scale': 1.0,  # Scale for collective hidden layer
     
@@ -34,8 +36,10 @@ CONFIG_DEBUG = {
     'vary_analyst_architectures': False,  # Use different analyst architectures
     
     # Training
-    'batch_size': 256,  # Increased for smoother validation/test curves
+    'batch_size': 128,  # Optimized for accuracy
+    'gradient_accumulation_steps': 4,  # Accumulate over 4 steps → effective batch=512 (better GPU utilization)
     'eval_batch_size': 512,  # Larger batch size for validation/test (smoother metrics, no gradients)
+    'use_mixed_precision': True,  # Use FP16 for 1.5-2x speedup
     'learning_rate': 0.001,
     'epochs': 5,
     'optimizer': 'adam',  # 'adam', 'sgd', 'adamw' - Adam is good default for deep models
@@ -45,7 +49,7 @@ CONFIG_DEBUG = {
     
     # Data
     'dataset': 'fashion_mnist',  # Options: 'mnist' (too easy), 'fashion_mnist' (recommended), 'cifar10' (hard for MLPs)
-    'num_workers': 2,
+    'num_workers': 6,  # Increased for faster data loading (multithreading)
     'val_split': 0.1,
     
     # System
@@ -64,7 +68,9 @@ CONFIG_PHASE1 = {
     'analyst_hidden': [256, 128],  # Analyst hidden layers (SMALLER)
     'analyst_output': 64,  # Analyst output dimension
     'c_expert': 0.25,  # Expert encoder compression ratio
-    'c_collective': 0.25,  # Collective encoder compression ratio
+    'c_collective': 1.0,  # Multiplier for adaptive collective input dimension
+    'adaptive_collective_min_dim': 64,  # Extreme min bound (will be manually engineered)
+    'adaptive_collective_max_dim': 2048,  # Extreme max bound (will be manually engineered)
     'collective_version': 'simple_mlp',  # Start with simple version
     'collective_hidden_scale': 1.0,
     
@@ -77,18 +83,22 @@ CONFIG_PHASE1 = {
     'vary_analyst_architectures': False,
     
     # Training
-    'batch_size': 512,  # Increased for smoother validation/test curves
+    'batch_size': 128,  # Optimized for accuracy (wandb shows better than 512)
+    'gradient_accumulation_steps': 4,  # Accumulate over 4 steps → effective batch=512 (better GPU utilization)
     'eval_batch_size': 1024,  # Larger batch size for validation/test (smoother metrics, no gradients)
+    'use_mixed_precision': True,  # Use FP16 for 1.5-2x speedup
     'learning_rate': 0.001,
-    'epochs': 200,
+    'epochs': 100,
     'optimizer': 'adam',  # 'adam', 'sgd', 'adamw' - Adam is good default for deep models
     'weight_decay': 1e-4,
     'use_augmentation': True,  # Default: Use data augmentation (only for training, not val/test)
     'topk': (1,),  # Top-k accuracy: (1,) for top-1, (1, 5) for top-1 and top-5
+    'use_torch_compile': False,  # Use torch.compile() for 20-30% speedup (PyTorch 2.0+)
+    'use_mixed_precision': False,  # Use FP16 training for 1.5-2x speedup (requires compatible GPU)
     
     # Data
     'dataset': 'fashion_mnist',  # Options: 'mnist' (too easy), 'fashion_mnist' (recommended), 'cifar10' (hard for MLPs)
-    'num_workers': 4,
+    'num_workers': 8,  # Increased for faster data loading (multithreading)
     'val_split': 0.1,
     
     # System
@@ -179,13 +189,26 @@ def prepare_config(config):
     analyst_input_dim = config['input_dim'] + expert_encoder_output_dim
     config['analyst_input_dim'] = analyst_input_dim
     
-    # Compute collective input dimension
-    collective_input_dim = n_analysts * config['analyst_output']
-    config['collective_input_dim'] = collective_input_dim
+    # Compute adaptive collective input dimension using logarithmic scaling
+    import math
+    analyst_output = config['analyst_output']
+    n_analysts = config['n_analysts']
+    min_dim = config.get('adaptive_collective_min_dim', 64)
+    max_dim = config.get('adaptive_collective_max_dim', 2048)
     
-    # If using encoder_head collective, compute compressed collective dimension
+    # Adaptive formula: min(max_size, max(min_size, analyst_output * (1 + log2(n_analysts))))
+    log_calc = analyst_output * (1 + math.log2(max(n_analysts, 1)))  # Prevent log2(0)
+    adaptive_dim = min(max_dim, max(min_dim, int(log_calc)))
+    
+    # Apply c_collective multiplier
+    collective_input_dim = int(adaptive_dim * config['c_collective'])
+    config['collective_input_dim'] = collective_input_dim
+    config['adaptive_collective_base_dim'] = adaptive_dim  # Store for logging/debugging
+    
+    # If using encoder_head collective, this is now just for compatibility (not used if analyst encoder is added)
     if config['collective_version'] == 'encoder_head':
-        compressed_collective_dim = int(collective_input_dim * config['c_collective'])
+        # For v2, we might still compress further, but this is now secondary
+        compressed_collective_dim = int(collective_input_dim * config.get('c_collective_v2', 0.5))
         config['compressed_collective_dim'] = compressed_collective_dim
     
     return config
@@ -290,7 +313,7 @@ def print_config(config):
         'Architecture': [
             'n_total', 'expert_ratio', 'n_experts', 'n_analysts',
             'expert_hidden', 'expert_output', 'analyst_hidden', 'analyst_output',
-            'c_expert', 'c_collective', 'collective_version', 'collective_hidden_scale'
+            'c_expert', 'c_collective', 'adaptive_collective_min_dim', 'adaptive_collective_max_dim', 'collective_version', 'collective_hidden_scale'
         ],
         'Derived Dimensions': [
             'input_dim', 'num_classes', 'expert_encoder_output_dim',

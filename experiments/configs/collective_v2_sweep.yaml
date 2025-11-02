@@ -1,13 +1,16 @@
-# Wandb Sweep Configuration - COLLECTIVE MODEL V2
-# Optimized based on sweep insights from v1
-# Changes:
+# Wandb Sweep Configuration - COLLECTIVE MODEL V3
+# Optimized based on sweep insights from v1 and v2
+# Changes from v2:
+# - use_analyst_diversity=true (FIXED - important finding)
+# - vary_analyst_architectures=true (FIXED - important finding)
+# - Increased learning_rate max: 0.006 → 0.01 (expanded search space)
+# - Decreased c_expert mean: [0.1,0.25,0.5] → [0.1,0.15,0.2,0.25] (lower values preferred)
+# - 100 epochs
+# Previous fixes:
 # - adamw only (adam removed)
 # - use_expert_diversity=true (default)
-# - Reduced learning_rate range (0.0001-0.006)
-# - Increased batch_size (512, 1024)
-# - Use n_experts directly (1-4) instead of expert_ratio
-# - 125 epochs
-# - Only log-scaled efficiency metrics
+# - batch_size=128 performs better (reverted from 512-1024)
+# - expert_ratio used (min 2 experts enforced automatically by code)
 
 program: train.py
 method: bayes  # Bayesian optimization (smart search)
@@ -41,17 +44,17 @@ parameters:
   # TRAINING PARAMETERS (OPTIMIZED BASED ON SWEEP INSIGHTS)
   # =============================================================================
   epochs:
-    value: 125  # Reduced for faster iteration
+    value: 100
   
   batch_size:
     values: [128, 256]  # Reverted - wandb shows 128 performs better
   eval_batch_size:
-    values: [512, 1024]  # Larger batch for validation/test (smoother metrics)
+    values: [1024, 2048]  # Larger batch for validation/test
   
   learning_rate:
     distribution: log_uniform_values
     min: 0.0001
-    max: 0.006  # Reduced from 0.01 based on sweep insights
+    max: 0.01  # Increased search space based on new findings
   
   optimizer:
     value: adamw  # adamw is better, make it consistent
@@ -100,7 +103,7 @@ parameters:
   
   # Compression ratios
   c_expert:
-    values: [0.1, 0.25, 0.5]  # Expert encoder compression
+    values: [0.1, 0.15, 0.2, 0.25]  # Expert encoder compression (decreased mean - lower values preferred)
   
   c_collective:
     values: [0.1, 0.25, 0.5]  # Collective encoder compression
@@ -120,7 +123,7 @@ parameters:
     value: true  # Default true - helps performance
   
   use_analyst_diversity:
-    values: [true, false]
+    value: true  # Fixed to true - important based on new findings
   
   diversity_lambda:
     values: [0.0, 0.001, 0.01, 0.05]  # 0.0 = off
@@ -132,7 +135,7 @@ parameters:
     values: [true, false]
   
   vary_analyst_architectures:
-    values: [true, false]
+    value: true  # Fixed to true - important based on new findings
 
   # =============================================================================
   # DERIVED PARAMETERS (DO NOT SET - computed automatically)
@@ -150,20 +153,23 @@ parameters:
 early_terminate:
   type: hyperband
   min_iter: 20      # All runs get at least 20 epochs
-  max_iter: 125     # Best runs go to 125 epochs
+  max_iter: 100     # Best runs go to 100 epochs
   s: 2
   eta: 3            # Keep top 1/3 at each stage
 
 # =============================================================================
 # SWEEP INSIGHTS APPLIED
 # =============================================================================
-# Based on v1 sweep results:
+# Based on v1 + v2 sweep results:
 # 1. adamw > adam (now fixed)
-# 2. use_expert_diversity=true helps (now default)
-# 3. batch_size=128 performs better (reverted from 512-1024 based on wandb results)
-# 4. Lower learning_rate range (0.0001-0.006) better
-# 5. Lower expert_ratio (0.1-0.35) performs better than higher ratios
-# 6. diversity_temperature shows negative correlation (helps, keep range)
-# 7. Only log-scaled efficiency metrics (reduce clutter)
-# 8. Fixed loss efficiency calculation (lower is better, not inverse)
+# 2. use_expert_diversity=true helps (now fixed)
+# 3. use_analyst_diversity=true IMPORTANT (now fixed - NEW FINDING)
+# 4. vary_analyst_architectures=true IMPORTANT (now fixed - NEW FINDING)
+# 5. batch_size=128 performs better (reverted from 512-1024 based on wandb results)
+# 6. learning_rate: Expanded to 0.01 max (test higher rates - NEW)
+# 7. c_expert: Decreased mean [0.1,0.15,0.2,0.25] (lower values preferred - NEW)
+# 8. Lower expert_ratio (0.1-0.35) performs better than higher ratios
+# 9. diversity_temperature shows negative correlation (helps, keep range)
+# 10. Only log-scaled efficiency metrics (reduce clutter)
+# 11. Fixed loss efficiency calculation (lower is better, not inverse)
 

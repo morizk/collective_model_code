@@ -40,14 +40,32 @@ def train_epoch(model, train_loader, optimizer, config, device):
     }
     acc_meter = AverageMeter('Acc', ':.2f')
     
+    # Gradient accumulation setup
+    gradient_accumulation_steps = config.get('gradient_accumulation_steps', 1)
+    effective_batch_size = config['batch_size'] * gradient_accumulation_steps
+    
+    # Mixed precision (FP16) setup
+    use_mixed_precision = config.get('use_mixed_precision', False)
+    scaler = None
+    if use_mixed_precision:
+        try:
+            from torch.cuda.amp import autocast, GradScaler
+            scaler = GradScaler()
+            autocast_context = autocast
+        except ImportError:
+            print("⚠ Mixed precision not available (requires PyTorch 1.6+)")
+            use_mixed_precision = False
+    
     pbar = tqdm(train_loader, desc='Train', leave=False)
+    
+    optimizer.zero_grad()  # Zero gradients at start of epoch
+    
+    num_batches = len(train_loader)
     
     for batch_idx, (data, target) in enumerate(pbar):
         data, target = data.to(device), target.to(device)
         
-        # Forward pass
-        optimizer.zero_grad()
-        
+        # Forward pass (with mixed precision if enabled)
         # Check which diversity losses to compute (can be independent)
         # Backward compatibility: if old 'use_diversity_loss' flag exists, use it for both
         if 'use_diversity_loss' in config and 'use_expert_diversity' not in config:
@@ -61,12 +79,22 @@ def train_epoch(model, train_loader, optimizer, config, device):
             use_analyst_diversity = config.get('use_analyst_diversity', False)
         return_intermediates = use_expert_diversity or use_analyst_diversity
         
-        if return_intermediates:
-            logits, expert_outputs, analyst_outputs = model(data, return_intermediates=True)
+        # Mixed precision forward pass
+        if use_mixed_precision:
+            with autocast_context():
+                if return_intermediates:
+                    logits, expert_outputs, analyst_outputs = model(data, return_intermediates=True)
+                else:
+                    logits = model(data)
+                    expert_outputs = None
+                    analyst_outputs = None
         else:
-            logits = model(data)
-            expert_outputs = None
-            analyst_outputs = None
+            if return_intermediates:
+                logits, expert_outputs, analyst_outputs = model(data, return_intermediates=True)
+            else:
+                logits = model(data)
+                expert_outputs = None
+                analyst_outputs = None
         
         # Compute loss
         loss_dict = combined_loss(
@@ -80,20 +108,48 @@ def train_epoch(model, train_loader, optimizer, config, device):
             use_analyst_diversity=use_analyst_diversity
         )
         
-        # Backward pass
-        loss_dict['total'].backward()
-        optimizer.step()
+        # Scale loss for gradient accumulation
+        scaled_loss = loss_dict['total'] / gradient_accumulation_steps
         
-        # Update metrics
-        losses['prediction'].update(loss_dict['prediction'].item(), data.size(0))
-        losses['diversity_expert'].update(loss_dict['diversity_expert'].item(), data.size(0))
-        losses['diversity_analyst'].update(loss_dict['diversity_analyst'].item(), data.size(0))
-        losses['total'].update(loss_dict['total'].item(), data.size(0))
+        # Backward pass (with mixed precision if enabled)
+        if use_mixed_precision:
+            scaler.scale(scaled_loss).backward()
+        else:
+            scaled_loss.backward()
+        
+        # Update optimizer every N steps (gradient accumulation)
+        # NOTE: Loop processes ALL batches, but optimizer.step() only happens
+        # every gradient_accumulation_steps batches. Gradients accumulate
+        # in memory between steps, giving us effective_batch_size = batch_size × steps
+        if (batch_idx + 1) % gradient_accumulation_steps == 0:
+            if use_mixed_precision:
+                scaler.step(optimizer)
+                scaler.update()
+            else:
+                optimizer.step()
+            optimizer.zero_grad()
+        # Handle remaining gradients if epoch ends before completing accumulation
+        elif batch_idx == num_batches - 1 and (batch_idx + 1) % gradient_accumulation_steps != 0:
+            # Last batch and we have accumulated gradients that weren't stepped
+            if use_mixed_precision:
+                scaler.step(optimizer)
+                scaler.update()
+            else:
+                optimizer.step()
+            optimizer.zero_grad()
+        
+        # Update metrics (use actual batch size for logging, effective batch for training)
+        batch_size = data.size(0)
+        losses['prediction'].update(loss_dict['prediction'].item(), batch_size)
+        losses['diversity_expert'].update(loss_dict['diversity_expert'].item(), batch_size)
+        losses['diversity_analyst'].update(loss_dict['diversity_analyst'].item(), batch_size)
+        # Log total loss (use unscaled loss_dict['total'] for consistency)
+        losses['total'].update(loss_dict['total'].item(), batch_size)
         
         # Accuracy (configurable top-k)
         topk = config.get('topk', (1,))  # Default: top-1 for classification
         accuracies = compute_accuracy(logits, target, topk=topk)
-        acc_meter.update(accuracies[0], data.size(0))  # Use top-1 for metric
+        acc_meter.update(accuracies[0], batch_size)  # Use top-1 for metric
         
         # Update progress bar
         if batch_idx % config.get('log_interval', 50) == 0:
@@ -129,12 +185,25 @@ def validate(model, val_loader, config, device):
     loss_meter = AverageMeter('Loss', ':.4f')
     acc_meter = AverageMeter('Acc', ':.2f')
     
+    # Mixed precision for validation (if enabled)
+    use_mixed_precision = config.get('use_mixed_precision', False)
+    if use_mixed_precision:
+        try:
+            from torch.cuda.amp import autocast
+            autocast_context = autocast
+        except ImportError:
+            use_mixed_precision = False
+    
     with torch.no_grad():
         for data, target in tqdm(val_loader, desc='Val', leave=False):
             data, target = data.to(device), target.to(device)
             
-            # Forward pass
-            logits = model(data)
+            # Forward pass (with mixed precision if enabled)
+            if use_mixed_precision:
+                with autocast_context():
+                    logits = model(data)
+            else:
+                logits = model(data)
             
             # Loss (no diversity in validation)
             loss = nn.functional.cross_entropy(logits, target)
@@ -176,6 +245,32 @@ def train_strategy_c(config, train_loader, val_loader, test_loader=None):
     # Create model
     print("Creating CollectiveModel...")
     model = CollectiveModel(config).to(device)
+    
+    # Print optimization settings
+    gradient_accumulation_steps = config.get('gradient_accumulation_steps', 1)
+    use_mixed_precision = config.get('use_mixed_precision', False)
+    effective_batch_size = config['batch_size'] * gradient_accumulation_steps
+    
+    if gradient_accumulation_steps > 1:
+        print(f"✓ Gradient accumulation: {gradient_accumulation_steps} steps")
+        print(f"  Effective batch size: {config['batch_size']} × {gradient_accumulation_steps} = {effective_batch_size}")
+    
+    if use_mixed_precision:
+        print("✓ Mixed precision (FP16) enabled for 1.5-2x speedup")
+    
+    # Optional: Compile model (may help for large models, but adds overhead for small ones)
+    # Benchmark showed it's slower for our model size, so disabled by default
+    if config.get('use_torch_compile', False):
+        try:
+            # Try different modes - 'default' might work better than 'reduce-overhead'
+            model = torch.compile(model, mode='default')
+            print("⚠ Model compiled with torch.compile() - may be slower for small models!")
+            print("   Benchmark showed overhead > benefit. Use only if you test and see improvement.")
+        except AttributeError:
+            print("⚠ torch.compile() not available (requires PyTorch 2.0+)")
+        except Exception as e:
+            print(f"⚠ torch.compile() failed: {e}, continuing without compilation")
+    
     model_params_true = model.get_num_parameters()  # TRUE parameter count (not calculated)
     print(f"Model parameters: {model_params_true:,}")
     
@@ -235,6 +330,8 @@ def train_strategy_c(config, train_loader, val_loader, test_loader=None):
         'learning_rate': config.get('learning_rate'),
         'weight_decay': config.get('weight_decay'),
         'batch_size': config.get('batch_size'),
+        'gradient_accumulation_steps': config.get('gradient_accumulation_steps', 1),
+        'use_mixed_precision': config.get('use_mixed_precision', False),
         'eval_batch_size': config.get('eval_batch_size', None),
         'topk': config.get('topk', (1,)),
         # Dataset info
