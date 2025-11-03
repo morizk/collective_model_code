@@ -17,12 +17,12 @@ def run(
     test_loader=None,
     device: Optional[str] = None,
 ):
+    # core_train_strategy_c manages device internally from config
     return core_train_strategy_c(
         config=config,
         train_loader=train_loader,
         val_loader=val_loader,
-        test_loader=test_loader,
-        device=device
+        test_loader=test_loader
     )
 
 
