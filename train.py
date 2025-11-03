@@ -350,17 +350,21 @@ def main():
     
     # Train based on model type
     if model_type == 'collective':
-        # Collective model: train_strategy_c handles model creation and wandb
-        print(f"\nTraining Collective Model...")
+        # Collective model: dispatch to selected training strategy (default C)
+        from collective_model.training import get_strategy_runner
+        strategy = str(config.get('training_strategy', 'C')).upper()
+        print(f"\nTraining Collective Model (strategy {strategy})...")
         if not sweep_mode:
-            # Only set wandb project/name if not in sweep mode (sweep handles this)
             config['wandb_project'] = config.get('wandb_project', 'collective-architecture')
-            config['wandb_name'] = f"{args.config}-{args.model}"
-        train_strategy_c(
+            config['wandb_name'] = f"{args.config}-{args.model}-strategy-{strategy}"
+        run_strategy = get_strategy_runner(strategy)
+        run_strategy(
             config=config,
+            model=None,  # Strategy C builds the model internally; A/B may use this later
             train_loader=train_loader,
             val_loader=val_loader,
-            test_loader=test_loader
+            test_loader=test_loader,
+            device=str(device)
         )
     else:
         # Baseline: we handle everything
