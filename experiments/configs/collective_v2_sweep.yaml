@@ -152,7 +152,7 @@ parameters:
 # =============================================================================
 early_terminate:
   type: hyperband
-  min_iter: 20      # All runs get at least 20 epochs
+  min_iter: 50      # All runs get at least 50 epochs (less aggressive)
   max_iter: 100     # Best runs go to 100 epochs
   s: 2
   eta: 3            # Keep top 1/3 at each stage
