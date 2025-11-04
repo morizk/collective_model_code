@@ -483,36 +483,21 @@ def train_strategy_c(config, train_loader, val_loader, test_loader=None):
         loss_efficiency_million = (test_loss_final / model_params_true) * 1000000  # Loss per 1M params (lower is better)
         loss_efficiency_log = test_loss_final / math.log10(model_params_true + 1)  # Loss per log10(params) (lower is better)
         
+        # Log only essential metrics (remove duplicates)
         final_summary.update({
             'final_test_accuracy': test_acc_final,
             'final_test_loss': test_loss_final,
-            'final/test_accuracy': test_acc_final,
-            'final/test_loss': test_loss_final,
-            # Accuracy efficiency metrics
-            'final/param_efficiency': param_efficiency,  # Acc per 100K params
-            'param_efficiency': param_efficiency,
-            'final/accuracy_per_million_params': accuracy_per_million,
-            'accuracy_per_million_params': accuracy_per_million,
-            'final/accuracy_per_log10_params': accuracy_per_log_params,
+            # Only log-scaled efficiency metrics (reduce clutter)
             'final/param_efficiency/test_accuracy_per_log10_params': accuracy_per_log_params,  # For sweep optimization
-            # Loss efficiency metrics (inverse - higher is better)
-            'final/loss_efficiency_per_100k_params': loss_efficiency,
-            'final/loss_efficiency_per_1m_params': loss_efficiency_million,
-            'final/loss_efficiency_per_log10_params': loss_efficiency_log,
-            'loss_efficiency_per_100k_params': loss_efficiency,
-            'loss_efficiency_per_1m_params': loss_efficiency_million,
-            'loss_efficiency_per_log10_params': loss_efficiency_log
+            'final/loss_efficiency_per_log10_params': loss_efficiency_log
         })
         
-        # Also log as metrics for sweep optimization
+        # Log to wandb for sweep optimization (only essential metrics)
         wandb.log({
             'final/test_accuracy': test_acc_final,
             'final/test_loss': test_loss_final,
-            'final/param_efficiency': param_efficiency,
-            'final/accuracy_per_million_params': accuracy_per_million,
-            'final/accuracy_per_log10_params': accuracy_per_log_params,
             'final/param_efficiency/test_accuracy_per_log10_params': accuracy_per_log_params,  # For sweep optimization
-            'final/loss_per_log10_params': loss_efficiency_log  # Only log-scaled (reduce clutter)
+            'final/loss_efficiency_per_log10_params': loss_efficiency_log
         })
         
         print(f"\nParameter Efficiency (Accuracy - log-scaled):")

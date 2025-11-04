@@ -35,6 +35,11 @@ CONFIG_DEBUG = {
     'vary_expert_architectures': False,  # Use different expert architectures
     'vary_analyst_architectures': False,  # Use different analyst architectures
     
+    # Model-level Dropout (ensemble regularization)
+    'use_drop_models': False,  # Enable model-level dropout (drop entire models during training)
+    'drop_models_expert_rate': 0.1,  # Dropout rate for experts (0.0-1.0, each expert has this prob of being dropped)
+    'drop_models_analyst_rate': 0.1,  # Dropout rate for analysts (0.0-1.0, each analyst has this prob of being dropped)
+    
     # Training
     'batch_size': 128,  # Optimized for accuracy
     'gradient_accumulation_steps': 4,  # Accumulate over 4 steps → effective batch=512 (better GPU utilization)
@@ -81,6 +86,11 @@ CONFIG_PHASE1 = {
     'diversity_temperature': 1.0,
     'vary_expert_architectures': False,  # Start with uniform architectures
     'vary_analyst_architectures': False,
+    
+    # Model-level Dropout (ensemble regularization)
+    'use_drop_models': False,  # Enable model-level dropout (drop entire models during training)
+    'drop_models_expert_rate': 0.1,  # Dropout rate for experts (0.0-1.0, each expert has this prob of being dropped)
+    'drop_models_analyst_rate': 0.1,  # Dropout rate for analysts (0.0-1.0, each analyst has this prob of being dropped)
     
     # Training
     'batch_size': 128,  # Optimized for accuracy (wandb shows better than 512)
@@ -203,7 +213,6 @@ def prepare_config(config):
     # Apply c_collective multiplier
     collective_input_dim = int(adaptive_dim * config['c_collective'])
     config['collective_input_dim'] = collective_input_dim
-    config['adaptive_collective_base_dim'] = adaptive_dim  # Store for logging/debugging
     
     # If using encoder_head collective, this is now just for compatibility (not used if analyst encoder is added)
     if config['collective_version'] == 'encoder_head':
@@ -322,6 +331,9 @@ def print_config(config):
         'Diversity': [
             'use_diversity_loss', 'diversity_lambda', 'diversity_temperature',
             'vary_expert_architectures', 'vary_analyst_architectures'
+        ],
+        'Model Dropout': [
+            'use_drop_models', 'drop_models_expert_rate', 'drop_models_analyst_rate'
         ],
         'Training': [
             'batch_size', 'learning_rate', 'epochs', 'optimizer',

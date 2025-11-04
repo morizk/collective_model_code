@@ -95,7 +95,6 @@ class CollectiveModel(nn.Module):
         
         # Create analyst encoder (compresses analyst outputs to adaptive dimension)
         analyst_concat_dim = config['n_analysts'] * config['analyst_output']
-        adaptive_dim = config['adaptive_collective_base_dim']
         collective_input_dim = config['collective_input_dim']  # Already has c_collective applied
         
         self.analyst_encoder = Encoder(
@@ -114,6 +113,35 @@ class CollectiveModel(nn.Module):
             hidden_scale=config.get('collective_hidden_scale', 1.0),
             dropout=0.2
         )
+    
+    def _generate_drop_mask(self, n_models, drop_rate, device):
+        """
+        Generate a binary mask for model-level dropout.
+        
+        Ensures at least 1 model is always active (mask value = 1).
+        
+        Args:
+            n_models (int): Number of models
+            drop_rate (float): Dropout rate (0.0-1.0)
+            device: Device to create tensor on
+        
+        Returns:
+            torch.Tensor: Binary mask [n_models] where 1=active, 0=dropped
+        """
+        if n_models <= 1:
+            # If only 1 model, always keep it active
+            return torch.ones(n_models, device=device)
+        
+        # Generate random mask: each model has (1 - drop_rate) probability of being active
+        mask = (torch.rand(n_models, device=device) > drop_rate).float()
+        
+        # Ensure at least 1 model is active
+        if mask.sum() == 0:
+            # Randomly select one model to keep active
+            keep_idx = torch.randint(0, n_models, (1,), device=device).item()
+            mask[keep_idx] = 1.0
+        
+        return mask
     
     def forward(self, x, return_intermediates=False):
         """
@@ -135,6 +163,12 @@ class CollectiveModel(nn.Module):
         if x.dim() > 2:
             x = x.view(batch_size, -1)
         
+        # Check if model-level dropout is enabled (only during training)
+        use_drop_models = (
+            self.config.get('use_drop_models', False) and 
+            self.training  # Only apply during training, not during eval
+        )
+        
         # 1. Expert layer: Extract rich features
         # Note: Sequential loop is fine - PyTorch GPU operations are already parallelized
         # CUDA streams add overhead for small operations, so we keep it simple
@@ -142,6 +176,19 @@ class CollectiveModel(nn.Module):
         for expert in self.experts:
             expert_out = expert(x)
             expert_outputs.append(expert_out)
+        
+        # Apply model-level dropout to experts if enabled
+        if use_drop_models:
+            expert_drop_rate = self.config.get('drop_models_expert_rate', 0.1)
+            expert_mask = self._generate_drop_mask(
+                n_models=len(self.experts),
+                drop_rate=expert_drop_rate,
+                device=x.device
+            )
+            # Apply mask to each expert output (broadcast over batch dimension)
+            # expert_mask shape: [n_experts] -> [1, n_experts, 1] for broadcasting
+            for i, expert_out in enumerate(expert_outputs):
+                expert_outputs[i] = expert_out * expert_mask[i]
         
         # Concatenate expert outputs
         expert_concat = torch.cat(expert_outputs, dim=1)
@@ -158,6 +205,18 @@ class CollectiveModel(nn.Module):
         for analyst in self.analysts:
             analyst_out = analyst(analyst_input)
             analyst_outputs.append(analyst_out)
+        
+        # Apply model-level dropout to analysts if enabled
+        if use_drop_models:
+            analyst_drop_rate = self.config.get('drop_models_analyst_rate', 0.1)
+            analyst_mask = self._generate_drop_mask(
+                n_models=len(self.analysts),
+                drop_rate=analyst_drop_rate,
+                device=x.device
+            )
+            # Apply mask to each analyst output (broadcast over batch dimension)
+            for i, analyst_out in enumerate(analyst_outputs):
+                analyst_outputs[i] = analyst_out * analyst_mask[i]
         
         # Concatenate analyst outputs
         analyst_concat = torch.cat(analyst_outputs, dim=1)
@@ -204,7 +263,6 @@ if __name__ == '__main__':
     print(f"  n_experts={config['n_experts']}, n_analysts={config['n_analysts']}")
     print(f"  expert_encoder_output_dim={config['expert_encoder_output_dim']}")
     print(f"  analyst_input_dim={config['analyst_input_dim']}")
-    print(f"  adaptive_collective_base_dim={config.get('adaptive_collective_base_dim', 'N/A')}")
     print(f"  collective_input_dim={config['collective_input_dim']}")
     
     # Create model

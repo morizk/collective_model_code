@@ -1,18 +1,13 @@
 # Wandb Sweep Configuration - COLLECTIVE MODEL V4
-# Updated based on latest sweep insights
-# Changes from v3:
-# - batch_size: [256, 512] (NEW results show better performance than 128)
-# - n_total: [12, 14] (focused range)
-# - c_expert: uniform distribution (continuous values, not discrete)
-# - learning_rate: wider range (expanded)
-# - Added model-level dropout parameters (NEW feature)
-# Previous fixes (v3):
-# - use_analyst_diversity=true (FIXED - important finding)
-# - vary_analyst_architectures=true (FIXED - important finding)
-# - adamw only (adam removed)
-# - use_expert_diversity=true (default)
-# - use_augmentation=true (fixed)
-# - expert_ratio used (min 2 experts enforced automatically by code)
+# Latest optimized configuration with model-level dropout
+# Updated: Based on latest sweep insights and findings
+#
+# Key features:
+# - Model-level dropout (NEW - ensemble regularization)
+# - Batch size: [256, 512] (optimized)
+# - Uniform c_expert distribution (continuous exploration)
+# - Focused n_total range: [12, 14]
+# - Wider learning rate range: [0.0001, 0.02]
 
 program: train.py
 method: bayes  # Bayesian optimization (smart search)
@@ -43,13 +38,14 @@ parameters:
     value: 42
 
   # =============================================================================
-  # TRAINING PARAMETERS (OPTIMIZED BASED ON SWEEP INSIGHTS)
+  # TRAINING PARAMETERS (OPTIMIZED)
   # =============================================================================
   epochs:
     value: 100
   
   batch_size:
-    values: [256, 512]  # NEW results show 256-512 perform better than 128
+    values: [256, 512]  # Optimized: NEW results show 256-512 perform better
+  
   eval_batch_size:
     values: [1024, 2048]  # Larger batch for validation/test
   
@@ -59,13 +55,13 @@ parameters:
     max: 0.02  # Wider range for exploration
   
   optimizer:
-    value: adamw  # adamw is better, make it consistent
+    value: adamw  # Best optimizer based on findings
   
   weight_decay:
     values: [0.0, 0.0001, 0.001]
   
   use_augmentation:
-    value: true  # Default: Use data augmentation
+    value: true  # Fixed: augmentation helps
 
   # =============================================================================
   # COLLECTIVE ARCHITECTURE PARAMETERS
@@ -75,11 +71,11 @@ parameters:
   n_total:
     values: [12, 14]  # Focused range based on findings
   
-  # Expert ratio (scales with n_total - more adaptable than fixed n_experts)
+  # Expert ratio (scales with n_total)
   expert_ratio:
     distribution: uniform
     min: 0.1
-    max: 0.35  # Reduced from 0.4 - lower is better based on sweep insights
+    max: 0.35  # Lower is better based on sweep insights
   
   # Expert architecture
   expert_hidden:
@@ -124,10 +120,10 @@ parameters:
   # =============================================================================
   
   use_expert_diversity:
-    value: true  # Default true - helps performance
+    value: true  # Fixed: helps performance
   
   use_analyst_diversity:
-    value: true  # Fixed to true - important based on new findings
+    value: true  # Fixed: important finding
   
   diversity_lambda:
     values: [0.0, 0.001, 0.01, 0.05]  # 0.0 = off
@@ -139,7 +135,7 @@ parameters:
     values: [true, false]
   
   vary_analyst_architectures:
-    value: true  # Fixed to true - important based on new findings
+    value: true  # Fixed: important finding
 
   # =============================================================================
   # MODEL-LEVEL DROPOUT PARAMETERS (NEW - ensemble regularization)
@@ -169,14 +165,11 @@ parameters:
   # - collective_input_dim
 
 # =============================================================================
-# EARLY TERMINATION (Hyperband - stop bad runs early)
+# EARLY TERMINATION (DISABLED)
 # =============================================================================
-early_terminate:
-  type: hyperband
-  min_iter: 50      # All runs get at least 50 epochs (less aggressive)
-  max_iter: 100     # Best runs go to 100 epochs
-  s: 2
-  eta: 3            # Keep top 1/3 at each stage
+# Early termination removed to ensure all runs complete full 100 epochs
+# This provides complete data for analysis, even for underperforming configs
+# Note: Will take longer but gives more comprehensive results
 
 # =============================================================================
 # SWEEP INSIGHTS APPLIED (v4)
